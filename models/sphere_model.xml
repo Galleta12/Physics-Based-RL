@@ -1,0 +1,9 @@
+<mujoco>
+    <!-- <option gravity="0 0 0"/> -->
+    <!-- <worldbody> -->
+       <body name="new_sphere" pos="0 -1.2 1.4">
+            <geom name="new_sphere_geom" type="sphere" size="0.1" rgba="0.5 0.5 1 1" mass="5"/>
+        </body>
+    
+    <!-- </worldbody> -->
+</mujoco>
