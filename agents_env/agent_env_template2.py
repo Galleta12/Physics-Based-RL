@@ -30,7 +30,7 @@ from utils import SimpleConverter
 #the reference motion itself, a reference motion dictionary with useful data
 
 #I will create here the environemtn for my body
-class HumanoidDiff(PipelineEnv):
+class HumanoidDiff2(PipelineEnv):
     def __init__(
       self,
       reference_trajectory_qpos,
@@ -46,27 +46,19 @@ class HumanoidDiff(PipelineEnv):
         sys = mjcf.load_model(mj_model)
         
         # Set the policy execution timestep (30Hz)
-        #self._dt = 1.0 / 30  # Policy execution frequency
+        self._dt = 1.0 / 30  # Policy execution frequency
                 
-        # # Set the optimal physics simulation timestep (1.2kHz)
-        # optimal_timestep = 1.0 / 1200  # Physics simulation frequency 
+        # Set the optimal physics simulation timestep (1.2kHz)
+        optimal_timestep = 1.0 / 1200  # Physics simulation frequency 
         
         
-        # sys = sys.tree_replace({'opt.timestep': optimal_timestep, 'dt':  optimal_timestep })
-        # #the num of frames will be 40, make play with this more  
+        sys = sys.tree_replace({'opt.timestep': optimal_timestep, 'dt':  optimal_timestep })
+        #the num of frames will be 40, make play with this more  
         
-        # n_frames = kwargs.pop('n_frames', int(self._dt / sys.opt.timestep))
-        
-        self._dt = 1/60
-        # arbitray selection _dt/5 we can also use 0.0333 like diffmimic
-        #optimal_timestep = self._dt/5  
-        optimal_timestep = self._dt/5   
-        #sys = sys.tree_replace({'opt.timestep': optimal_timestep, 'dt': optimal_timestep})
-        sys = sys.tree_replace({'opt.timestep': 0.002, 'dt': 0.002})
-        
+        n_frames = kwargs.pop('n_frames', int(self._dt / sys.opt.timestep))
+       
       
-        n_frames = kwargs.pop('n_frames', int(self._dt / 0.002))
-        
+    
         
         
         super().__init__(sys, backend='mjx', n_frames=n_frames)

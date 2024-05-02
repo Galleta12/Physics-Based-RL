@@ -1,6 +1,7 @@
 from pyquaternion import Quaternion
 import numpy as np
-
+import jax
+from jax import numpy as jp
 #here I will change the coordinate frame
 #since mujoco uses the z axis as the up vector
 #x as the right vector and the y axis as the forward vector
@@ -62,3 +63,59 @@ def calc_rot_vel(seg_0, seg_1, dura):
     
     
     return diff_angular
+
+
+
+
+#this function is for the pd, to generate custom
+#trajectories
+#I will use a cubic trajectory so it can be smooth
+#for the real pd-controller I will not use that. I got this idea from mujoco-python vids on 
+#youtube
+def generate_trajectory(t0, tf, q0, qf):
+    tf_t0_3 = (tf - t0)**3
+    a0 = qf*(t0**2)*(3*tf-t0) + q0*(tf**2)*(tf-3*t0)
+    a0 = a0 / tf_t0_3
+
+    a1 = 6 * t0 * tf * (q0 - qf)
+    a1 = a1 / tf_t0_3
+
+    a2 = 3 * (t0 + tf) * (qf - q0)
+    a2 = a2 / tf_t0_3
+
+    a3 = 2 * (q0 - qf)
+    a3 = a3 / tf_t0_3
+
+    #return a0, a1, a2, a3
+    return jp.array([a0, a1, a2, a3])
+
+
+
+def start_trajectories(trajectory_dict,use_dummy=True):
+    #dummy trajectory to initialize everything at zero
+    if use_dummy:
+        #standard trajectory
+        single_trajectory = generate_trajectory(1, 3, 0, 0)
+        # Repeat this trajectory 28 times to form a 28x4 array
+        #28 nu, number of actuators
+        trajectories = jp.tile(single_trajectory, (28, 1))
+    
+    #now on the specified indices changes the jp array with the ones
+    #on the trajectory dict
+    # Convert dictionary to index and value arrays
+    indices = jp.array(list(trajectory_dict.keys()))
+    new_trajectories = jp.stack(list(trajectory_dict.values()))
+    # Perform the update in a single operation
+    trajectories = trajectories.at[indices].set(new_trajectories)
+    
+    return trajectories
+
+#compute the cubic trajectory array
+def compute_cubic_trajectory(time,trajectory):
+    #trajectory = start_trajectories()
+    #only for the pos/angles since we dont want trajectory for the vel
+    #we use the coma to specify that we want to include all rows and the 0
+    #it self
+    cubic_trajectory = trajectory[:,0] + trajectory[:,1] * time + \
+        trajectory[:,2] * (time **2) + trajectory[:,3]* (time**3)
+    return cubic_trajectory
