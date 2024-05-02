@@ -160,7 +160,7 @@ class HumanoidTrain(HumanoidDiff):
 
         """              
         done =1.0
-            
+        #self.dt
         qpos = state.pipeline_state.q
         qvel = state.pipeline_state.qd
     
@@ -236,8 +236,7 @@ class HumanoidTrain(HumanoidDiff):
         )
     
     #just with a custom target but not selected joints
-    def step_custom_target_and_outside(self, state: State, action: jp.ndarray,
-                                           custom_target,time) -> State:
+    def step_custom_target_and_outside(self, state: State, action: jp.ndarray) -> State:
         #note this is how it looks a state
         """
         @struct.dataclass
