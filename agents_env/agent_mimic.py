@@ -235,3 +235,39 @@ class HumanoidTrain(HumanoidDiff):
             pipeline_state=data, obs=obs, reward=reward, done=done
         )
     
+    #just with a custom target but not selected joints
+    def step_custom_target_and_outside(self, state: State, action: jp.ndarray,
+                                           custom_target,time) -> State:
+        #note this is how it looks a state
+        """
+        @struct.dataclass
+        class State(base.Base):
+            #Environment state for training and inference
+            pipeline_state: Optional[base.State]
+            obs: jax.Array
+            reward: jax.Array
+            done: jax.Array
+            metrics: Dict[str, jax.Array] = struct.field(default_factory=dict)
+            info: Dict[str, Any] = struct.field(default_factory=dict)
+
+        """              
+        done =1.0
+            
+        qpos = state.pipeline_state.q
+        qvel = state.pipeline_state.qd
+            
+        #jax.debug.print("x: {}",pd)  
+        
+    
+        #updated_ctrl = state.pipeline_state.ctrl.at[:].set(pd)
+       
+        data = self.pipeline_step(state.pipeline_state,action)
+        
+        reward = jp.zeros(3)
+        
+        obs = self._get_obs(data, action)
+        
+        return state.replace(
+            pipeline_state=data, obs=obs, reward=reward, done=done
+        )
+    
