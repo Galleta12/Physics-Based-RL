@@ -13,7 +13,7 @@ sys.path.append(parent_dir)
 # from transformations import euler_from_quaternion
 # from some_math import *
 
-from util_data import BODY_DEFS, BODY_JOINTS_IN_DP_ORDER, DOF_DEF, BODY_JOINTS,BODY_HIERARCHY_JOINTS,BODY_INTIAL_XPOS_MUJOCO_XML,BODY_INITIAL_XQUAT_MUJOCO_XML, JOINTS_AXIS_ONEDOF
+from .util_data import BODY_DEFS, BODY_JOINTS_IN_DP_ORDER, DOF_DEF, BODY_JOINTS,BODY_HIERARCHY_JOINTS,BODY_INTIAL_XPOS_MUJOCO_XML,BODY_INITIAL_XQUAT_MUJOCO_XML, JOINTS_AXIS_ONEDOF
 
 #from util_data import BODY_DEFS, BODY_JOINTS_IN_DP_ORDER, DOF_DEF, BODY_JOINTS,BODY_HIERARCHY_JOINTS,BODY_INTIAL_XPOS_MUJOCO_XML,BODY_INITIAL_XQUAT_MUJOCO_XML
 
@@ -100,25 +100,24 @@ class SimpleConverter(object):
         rot_matrix[index] = global_rotation
         
         
-        #now for the position
-        # Parent global position
-        global_pos_parent = pos_matrix[idx]
         
-        #convert the quaternion to a rotation matrix
-        rotation_global_matrix = quaternion_to_rotation_matrix(global_rotation)
-        
-        # Local offset needs to be transformed by the global rotation
-        local_offset = pos_matrix[index]
-        transformed_offset = rotation_global_matrix @ local_offset
-
-        # Calculate the global position by adding the transformed local offset to the parent's global position
-        global_pos = global_pos_parent + transformed_offset
-
         # Save the global position
-        pos_matrix[index] = global_pos
+        pos_matrix[index] = self.get_global_pos(pos_matrix,idx,index,parent_quat)
         
         
          
+    def get_global_pos(self,pos_matrix,idx,index,parent_rotation):
+        global_pos_parent = pos_matrix[idx]
+        local_pos = pos_matrix[index]
+        #get the rotation in a matrix
+        rotation_parent_matrix = quaternion_to_rotation_matrix(parent_rotation)
+        #apply transformation
+        transformation_matrix = apply_transformation(rotation_parent_matrix,global_pos_parent,local_pos)
+        
+        global_pos =transformation_matrix[:3]
+        
+        return global_pos
+
         
        
     
@@ -139,23 +138,11 @@ class SimpleConverter(object):
         
         rot_matrix[index] = global_rotation
         
-        #now for the position
-        # Parent global position
-        global_pos_parent = pos_matrix[idx]
-        
-        #convert the quaternion to a rotation matrix
-        rotation_global_matrix = quaternion_to_rotation_matrix(global_rotation)
-        
-        # Local offset needs to be transformed by the global rotation
-        local_offset = pos_matrix[index]
-        transformed_offset = rotation_global_matrix @ local_offset
-
-        # Calculate the global position by adding the transformed local offset to the parent's global position
-        global_pos = global_pos_parent + transformed_offset
-
         # Save the global position
-        pos_matrix[index] = global_pos
+        pos_matrix[index] = self.get_global_pos(pos_matrix,idx,index,parent_quat)
+       
         
+          
     
     def start_matrices_savers(self):
         
@@ -289,7 +276,7 @@ class SimpleConverter(object):
                     quat = state[each_joint]
                     
                     
-                    
+                    #index plus one since we start from the chest, but the matrix start from the root
                     self.get_global_pos_rot_joints(x_pos_matrix,x_rot_matrix,index+1,each_joint,quat)
                     
             
@@ -373,9 +360,9 @@ if __name__ == "__main__":
     s.load_mocap()
     
     #testing the global pos
-    print(s.data_xpos[0:3])
+    #print(s.data_xpos[0:3])
     print('rotation')
-    #print(s.data_xrot[0:3])
+    print(s.data_xrot[0:3])
     
     
     

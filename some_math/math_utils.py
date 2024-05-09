@@ -78,7 +78,7 @@ def get_global_rotation_quat(parent,local):
 
 
 #got this from brax
-def rotate(vec: jax.Array, quat: jax.Array):
+def rotate_vec_quat(vec, quat):
   """Rotates a vector vec by a unit quaternion quat.
 
   Args:
@@ -96,7 +96,16 @@ def rotate(vec: jax.Array, quat: jax.Array):
   return r
 
 
-
+def apply_transformation(rot_matrix, traslation, vec):
+    #4x4
+    transformation_matrix = np.eye(4)
+    #set the top with the rot matrix
+    transformation_matrix[:3,:3] = rot_matrix
+    #apply the traslation on the right
+    transformation_matrix[:3,3] = traslation 
+    vec_homogeneous = np.append(vec,1)
+    #perform the transformation
+    return transformation_matrix @ vec_homogeneous
 
 #formulat to get a rotation matrix from a quaterion
 def quaternion_to_rotation_matrix(quaternion):
