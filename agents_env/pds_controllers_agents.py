@@ -97,7 +97,7 @@ def init_corolis_mass_external_diagonal(state:State,kp_array,kd_array):
 #calculate the new mass,
 
 def calculate_new_mass(M,KD,dt):
-    jax.debug.print("M: {}", M)
+    #jax.debug.print("M: {}", M)
     
     new_mass = M + (KD * dt)
 
@@ -135,7 +135,7 @@ def compute_acceleration(q_error,qdot,C,tau_ext,new_mass,KP,KD):
 
 #perfomr the stable pd controller
 def stable_pd_controller_custom_trajectory(target,sys:base.System,state:State,q,qdot,kp_array,kd_array,time,dt):
-    jax.debug.print("PD: {}", 3)
+    #jax.debug.print("PD: {}", 3)
     #this could change more when doing it with the real angles
     target_q_next= compute_cubic_trajectory(time+dt,target)
     

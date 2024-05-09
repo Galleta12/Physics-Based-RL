@@ -1,13 +1,26 @@
 
 import json
 import numpy as np
+import sys
+import os
+
+# Append the parent directory of both utils and some_math to sys.path
+current_dir = os.path.dirname(os.path.realpath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
+
 # from util_data import BODY_DEFS, BODY_JOINTS_IN_DP_ORDER, DOF_DEF, BODY_JOINTS
 # from transformations import euler_from_quaternion
 # from some_math import *
 
-from .util_data import BODY_DEFS, BODY_JOINTS_IN_DP_ORDER, DOF_DEF, BODY_JOINTS
+from util_data import BODY_DEFS, BODY_JOINTS_IN_DP_ORDER, DOF_DEF, BODY_JOINTS,BODY_HIERARCHY_JOINTS,BODY_INTIAL_XPOS_MUJOCO_XML,BODY_INITIAL_XQUAT_MUJOCO_XML, JOINTS_AXIS_ONEDOF
+
+#from util_data import BODY_DEFS, BODY_JOINTS_IN_DP_ORDER, DOF_DEF, BODY_JOINTS,BODY_HIERARCHY_JOINTS,BODY_INTIAL_XPOS_MUJOCO_XML,BODY_INITIAL_XQUAT_MUJOCO_XML
+
 from some_math.transformations import euler_from_quaternion
 from some_math.math_utils import *
+
+
 import jax
 from jax import numpy as jp
 
@@ -70,13 +83,101 @@ class SimpleConverter(object):
         self.all_states = self.all_states
         self.durations = np.array(self.durations)
         
+    
+    
+      
+    
+    def get_global_pos_rot_joints(self,pos_matrix,rot_matrix,index,joint_name,local_quat):
         
+        #get the parent rotation      
+        parent_name,idx = BODY_HIERARCHY_JOINTS[joint_name]
+        #the parent will be in quaternion
+        parent_quat = rot_matrix[idx]
+        
+                
+        #calculate the global rotation
+        global_rotation = get_global_rotation_quat(parent_quat,local_quat)
+        rot_matrix[index] = global_rotation
+        
+        
+        #now for the position
+        # Parent global position
+        global_pos_parent = pos_matrix[idx]
+        
+        #convert the quaternion to a rotation matrix
+        rotation_global_matrix = quaternion_to_rotation_matrix(global_rotation)
+        
+        # Local offset needs to be transformed by the global rotation
+        local_offset = pos_matrix[index]
+        transformed_offset = rotation_global_matrix @ local_offset
+
+        # Calculate the global position by adding the transformed local offset to the parent's global position
+        global_pos = global_pos_parent + transformed_offset
+
+        # Save the global position
+        pos_matrix[index] = global_pos
+        
+        
+         
+        
+       
+    
+    #remember the angles are in radians
+    def get_global_pos_rot_joints_axis(self,pos_matrix,rot_matrix,index,joint_name,local_angle):
+        
+        #get the parent rotation      
+        parent_name,idx = BODY_HIERARCHY_JOINTS[joint_name]
+        #the paretn will be in quaternion
+        parent_quat = rot_matrix[idx]
+        
+        #now we need to convert the local_angle axis to quat
+        local_quat = axis_angle_to_quat(np.array(JOINTS_AXIS_ONEDOF[joint_name]),local_angle)
+        
+        
+        #calculate the global rotation
+        global_rotation = get_global_rotation_quat(parent_quat,local_quat)
+        
+        rot_matrix[index] = global_rotation
+        
+        #now for the position
+        # Parent global position
+        global_pos_parent = pos_matrix[idx]
+        
+        #convert the quaternion to a rotation matrix
+        rotation_global_matrix = quaternion_to_rotation_matrix(global_rotation)
+        
+        # Local offset needs to be transformed by the global rotation
+        local_offset = pos_matrix[index]
+        transformed_offset = rotation_global_matrix @ local_offset
+
+        # Calculate the global position by adding the transformed local offset to the parent's global position
+        global_pos = global_pos_parent + transformed_offset
+
+        # Save the global position
+        pos_matrix[index] = global_pos
+        
+    
+    def start_matrices_savers(self):
+        
+        xpos_matrix = np.array(list(BODY_INTIAL_XPOS_MUJOCO_XML.values()))
+        xquat_matrix = np.array(list(BODY_INITIAL_XQUAT_MUJOCO_XML.values()))
+        return xpos_matrix,xquat_matrix
+    
     def convert_to_mujoco_data(self):
         self.data_vel = []
         self.data_pos = []
+        self.data_xpos =[]
+        self.data_xrot =[]
         
         #this will loop the shape row of the motions, since that is the lenght of all state
         for k in range(len(self.all_states)):
+            #the dim are the rows the joint and 3 for the x,y,z pos
+            #and 4 for the quaternions
+            # x_pos_matrix = np.zeros((13,3))
+            # x_rot_matrix = np.zeros((13,4))
+            x_pos_matrix, x_rot_matrix = self.start_matrices_savers()
+            
+            
             #for the velocity
             tmp_vel = []
             tmp_angle = []
@@ -119,8 +220,11 @@ class SimpleConverter(object):
                 #remeber this will return 3 rotations
                 #this is the linear velocity
                 tmp_vel += ((self.data[k, init_idx:offset_idx] - self.data[k-1, init_idx:offset_idx])*1.0/dura).tolist()
-            #save the pos, rember that is in angle representation
+            #save the pos, rember that is in quaterion representation
             tmp_angle += state['root_pos'].tolist()
+            x_pos_matrix[0] = state['root_pos'].tolist()
+            
+            
             # root rot
             init_idx = offset_idx
             #we grab the 4 columns for the root rotations
@@ -139,10 +243,11 @@ class SimpleConverter(object):
                 #print(tmp_vel)
             #saved the root rotation
             tmp_angle += state['root_rot'].tolist()
+            x_rot_matrix[0] = state['root_rot'].tolist()
             
             
                 #now do the same for the joints
-            for each_joint in BODY_JOINTS:
+            for index,each_joint in enumerate(BODY_JOINTS):
                 init_idx = offset_idx
                 #generate a tmp val for the joint
                 #first grab the positions 4
@@ -159,6 +264,18 @@ class SimpleConverter(object):
                     else:
                         tmp_vel += ((self.data[k, init_idx:offset_idx] - self.data[k-1, init_idx:offset_idx])*1.0/dura).tolist()
                     tmp_angle += state[each_joint].tolist()
+                    
+                    
+                    #since here it start from,chest but we want to start from
+                    #the root, Body joints start from chest
+                    #pos_matrix[index+1] = list(euler_tuple)
+                
+                    self.get_global_pos_rot_joints_axis(x_pos_matrix,x_rot_matrix,index+1,each_joint,state[each_joint])
+                    
+                    
+                    ##later
+                    #x_pos_matrix[index] = 
+                    
                 #do the same for the joints with more dofs
                 elif DOF_DEF[each_joint] == 3:
                     assert 4 == len(tmp_val)
@@ -170,6 +287,12 @@ class SimpleConverter(object):
                         tmp_vel += calc_rot_vel(self.data[k, init_idx:offset_idx], self.data[k-1, init_idx:offset_idx], dura)
                     #save the quat on each joint
                     quat = state[each_joint]
+                    
+                    
+                    
+                    self.get_global_pos_rot_joints(x_pos_matrix,x_rot_matrix,index+1,each_joint,quat)
+                    
+            
                     #change the format for the transformation library
                     #the last element the real
                     quat = np.array([quat[1], quat[2], quat[3], quat[0]])
@@ -180,13 +303,13 @@ class SimpleConverter(object):
                     tmp_angle += list(euler_tuple)
             
             
-            
             #this is qvel
             self.data_vel.append(np.array(tmp_vel))
             #this is qpos
             self.data_pos.append(np.array(tmp_angle))
 
-            
+            self.data_xpos.append(x_pos_matrix)
+            self.data_xrot.append(x_rot_matrix)
 
         
             
@@ -245,33 +368,42 @@ class SimpleConverter(object):
 
 if __name__ == "__main__":
 
-    file_path = "motions/humanoid3d_walk.txt"
+    file_path = "motions/humanoid3d_punch.txt"
     s = SimpleConverter(file_path)
     s.load_mocap()
-    print("motino shape", s.motions.shape)
-    #shape of the row of the motions is the len of the durations
-    print("durations", s.durations)
-    print("duration shape", s.durations.shape)
-    #lenght of the motion, in the case of the walk is 1.26 sec
-    print("time", s.total_time)
-    print("all state root pos", s.all_states[-1]['chest'])
-    # print("len state", len(s.all_states))
+    
+    #testing the global pos
+    print(s.data_xpos[0:3])
+    print('rotation')
+    #print(s.data_xrot[0:3])
+    
+    
+    
+    
+    # print("motino shape", s.motions.shape)
+    # #shape of the row of the motions is the len of the durations
+    # print("durations", s.durations)
+    # print("duration shape", s.durations.shape)
+    # #lenght of the motion, in the case of the walk is 1.26 sec
+    # print("time", s.total_time)
+    # print("all state root pos", s.all_states[-1]['chest'])
+    # # print("len state", len(s.all_states))
 
 
 
-    np.set_printoptions(edgeitems=30, linewidth=1000, 
-        formatter=dict(float=lambda x: "%.3g" % x))
+    # np.set_printoptions(edgeitems=30, linewidth=1000, 
+    #     formatter=dict(float=lambda x: "%.3g" % x))
 
 
 
-    print("data matrix", s.data[-1])
-    print("data shape", s.data.shape)
+    # print("data matrix", s.data[-1])
+    # print("data shape", s.data.shape)
 
-    # print('qvel', s.data_pos)
-    # print('qpos', s.data_vel)
+    # # print('qvel', s.data_pos)
+    # # print('qpos', s.data_vel)
 
-    print('qvel', len(s.data_pos))
-    print('qpos', len(s.data_vel))
+    # print('qvel', len(s.data_pos))
+    # print('qpos', len(s.data_vel))
 
 
 

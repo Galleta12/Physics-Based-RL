@@ -2,6 +2,7 @@ from pyquaternion import Quaternion
 import numpy as np
 import jax
 from jax import numpy as jp
+from math import sqrt, pi, sin, cos, asin, acos, atan2, exp, log
 #here I will change the coordinate frame
 #since mujoco uses the z axis as the up vector
 #x as the right vector and the y axis as the forward vector
@@ -63,6 +64,74 @@ def calc_rot_vel(seg_0, seg_1, dura):
     
     
     return diff_angular
+
+
+
+
+def get_global_rotation_quat(parent,local):
+    parent_quat = Quaternion(parent[0], parent[1], parent[2], parent[3])
+    local_quat = Quaternion(local[0], local[1], local[2], local[3])
+    global_rot = (parent_quat * local_quat) 
+    
+    return global_rot.elements
+
+
+
+#got this from brax
+def rotate(vec: jax.Array, quat: jax.Array):
+  """Rotates a vector vec by a unit quaternion quat.
+
+  Args:
+    vec: (3,) a vector
+    quat: (4,) a quaternion
+
+  Returns:
+    ndarray(3) containing vec rotated by quat.
+  """
+  if len(vec.shape) != 1:
+    raise ValueError('vec must have no batch dimensions.')
+  s, u = quat[0], quat[1:]
+  r = 2 * (np.dot(u, vec) * u) + (s * s -np.dot(u, u)) * vec
+  r = r + 2 * s * np.cross(u, vec)
+  return r
+
+
+
+
+#formulat to get a rotation matrix from a quaterion
+def quaternion_to_rotation_matrix(quaternion):
+    """Convert a quaternion [w, x, y, z] to a 3x3 rotation matrix."""
+    w, x, y, z = quaternion
+    return np.array([
+        [1 - 2*y**2 - 2*z**2, 2*x*y - 2*z*w, 2*x*z + 2*y*w],
+        [2*x*y + 2*z*w, 1 - 2*x**2 - 2*z**2, 2*y*z - 2*x*w],
+        [2*x*z - 2*y*w, 2*y*z + 2*x*w, 1 - 2*x**2 - 2*y**2]
+    ])
+
+
+#got it from the pyquaterion
+def axis_angle_to_quat(axis, angle):
+        """Initialise from axis and angle representation
+
+        Create a Quaternion by specifying the 3-vector rotation axis and rotation
+        angle (in radians) from which the quaternion's rotation should be created.
+
+        Params:
+            axis: a valid numpy 3-vector
+            angle: a real valued angle in radians
+        """
+        mag_sq = np.dot(axis, axis)
+        if mag_sq == 0.0:
+            raise ZeroDivisionError("Provided rotation axis has no length")
+        # Ensure axis is in unit vector form
+        if (abs(1.0 - mag_sq) > 1e-12):
+            axis = axis / sqrt(mag_sq)
+        theta = angle / 2.0
+        r = cos(theta)
+        i = axis * sin(theta)
+
+        quaterion = [r, i[0], i[1], i[2]]
+        return np.array(quaterion)
 
 
 
