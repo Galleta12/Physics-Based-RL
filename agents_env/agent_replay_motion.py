@@ -68,10 +68,10 @@ class HumanoidReplay(HumanoidDiff):
         done =1.0     
         qpos = data0.qpos
         qvel = data0.qvel
-        
         #forward dynamics if you check the code you will see
         #the pipeline init perform forward kinematics
         data = self.pipeline_init(qpos, qvel)
+        #jax.debug.print("qvel: {}",data.qd)
         
         
         reward = jp.zeros(3)

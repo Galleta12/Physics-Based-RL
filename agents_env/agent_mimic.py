@@ -109,7 +109,7 @@ class HumanoidTrain(HumanoidDiff):
 
         """              
         done =1.0
-            
+        
         qpos = state.pipeline_state.q
         qvel = state.pipeline_state.qd
     

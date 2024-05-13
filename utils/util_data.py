@@ -111,7 +111,7 @@ BODY_INITIAL_XQUAT_MUJOCO_XML={'root': [1., 0., 0., 0.],
  'left_knee': [1., 0., 0., 0.],
  'left_ankle': [1., 0., 0., 0.]}
     
-#function to select an specific joint in this case we will work with the left shoulder
+#function to select an specific joint
 #joint
 
 def get_joint_index(model,name_body,axis):
