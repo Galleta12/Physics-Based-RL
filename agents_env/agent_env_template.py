@@ -122,12 +122,22 @@ class HumanoidDiff(PipelineEnv):
         # Mask to filter out the quaternions that are not to be combined in triples
         mask = jp.ones(hinge_quat.shape[0], dtype=bool)
         mask = mask.at[one_dofs_joints_idx].set(False)
-
-        #index 0 since is a tuple and we want the indices that are index 0
-        combinable_indices = jp.where(mask)[0]
-        #negate it to get the inverse
-        non_combinable_indices = jp.where(~mask)[0]
-
+        
+        # #keep track of the tur and false values
+        # true_mask = jp.sum(mask)
+        # false_mask = mask.size - true_mask
+        
+        # Indices that can be combined
+        combinable_indices = jp.nonzero(mask, size=mask.size)[0]
+#       #since the size will be 28, the same as the mask we only select
+        #the first values and get rid of the last values, for now
+        #24 and 4 is static. I wish this do be dynamic
+        combinable_indices = combinable_indices[0:24]
+        
+        # Indices that cannot be combined
+        non_combinable_indices = jp.nonzero(~mask, size=mask.size)[0]
+        non_combinable_indices = non_combinable_indices[0:4]
+             
         no_grouped_quaterions = hinge_quat[non_combinable_indices]
 
         #select and store these indices
@@ -138,18 +148,24 @@ class HumanoidDiff(PipelineEnv):
         vmap_combined_quat = jax.vmap(combine_quaterions_joint_3DOFS)
 
         quat_combined = vmap_combined_quat(grouped_quaternions)
-        
         #there are 13 links -12, since we will merge the root at the end the shape 1 is 4 for the quat
-        quat_loc_all_joints = jp.zeros((current_x_quat[0]-1,current_x_quat[1]))
+        quat_loc_all_joints = jp.zeros((current_x_quat.shape[0]-1,current_x_quat.shape[1]))
 
-        # Create a mask where each position is True if the corresponding link type is 3
+        #Create a mask where each position is True if the corresponding link type is 3
         link_types_mask = link_types_array_without_root == 3
-
-        filter_out_jnt_type_idx = jp.where(link_types_mask)
-
-        filter_out_jnt_type_one_dofs = jp.where(~link_types_mask)
-
-        quat_loc_all_joints = quat_loc_all_joints.at[filter_out_jnt_type_idx].set(quat_combined)
+        
+        filter_out_jnt_type_3_idx = jp.nonzero(link_types_mask,size=link_types_mask.size)
+        
+        #the first row is where is the data the shape is 1,12
+        #there are 8 indices for the 3 dofs and 4 for the one dofs
+        filter_out_jnt_type_3_idx = jp.array(filter_out_jnt_type_3_idx)[0][0:8]
+        
+        filter_out_jnt_type_one_dofs = jp.nonzero(~link_types_mask,size=link_types_mask.size)
+        
+        filter_out_jnt_type_one_dofs = jp.array(filter_out_jnt_type_one_dofs)[0][0:4]
+        
+        
+        quat_loc_all_joints = quat_loc_all_joints.at[filter_out_jnt_type_3_idx].set(quat_combined)
 
         quat_loc_all_joints = quat_loc_all_joints.at[filter_out_jnt_type_one_dofs].set(no_grouped_quaterions)
 
