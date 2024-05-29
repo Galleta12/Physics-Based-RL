@@ -42,7 +42,7 @@ def standard_pd_controller(target,sys:base.System,
 def feedback_pd_controller(target,sys:base.System,
                            state:State,q,qdot,kp_array,kd_array,time,dt):
     
-    jax.debug.print("Feedback: {}", 2)
+    #jax.debug.print("Feedback: {}", 2)
     q = q[7:]
     qdot = qdot[6:]
     #calculate error position
@@ -179,7 +179,7 @@ def stable_pd_controller_custom_trajectory(target,sys:base.System,state:State,q,
 def stable_pd_controller_trajectory(target,sys:base.System,state:State,q,qdot,kp_array,kd_array,time,dt):
     #jax.debug.print("PD: {}", 3)
     #this could change more when doing it with the real angles
-    target_q_next= target
+    target_q_next= compute_cubic_trajectory(time,target)
     
     #calculate the next q erro, this is on the paper stable pd
     #this is have dim nu

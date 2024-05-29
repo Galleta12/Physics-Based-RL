@@ -154,3 +154,45 @@ def get_actuator_indx(model,name,axis):
         index +=2
     
     return index - 1
+
+
+def move_only_arm_vel(data_vel_mocap):
+    # Create a copy of the input array
+    new_data = jp.copy(data_vel_mocap)
+    
+    
+    
+    # Indices of the right arm
+    idx_right_arm = jp.array([13, 14, 15, 16])
+    
+    
+    # Step 2: Set all values to zero except those at the indices in idx_right_arm
+    mask = jp.ones(new_data.shape[1], dtype=bool)
+    mask = mask.at[idx_right_arm].set(False)
+    
+    new_data = jp.where(mask, 0, new_data)
+    return new_data
+
+
+
+def move_only_arm(data_pos_mocap):
+    # Create a copy of the input array
+    new_data = jp.copy(data_pos_mocap)
+    
+    # Define data for root
+    data_for_root = jp.array([0. , 0. , 0.9, 1. , 0. , 0. , 0.])
+    
+    # Indices of the right arm
+    idx_right_arm = jp.array([13, 14, 15, 16])
+    
+    # Step 1: Replace the first 7 values in each row with data_for_root
+    #new_data = new_data.at[:, :7].set(data_for_root)
+    
+    # Step 2: Set all values to zero except those at the indices in idx_right_arm
+    mask = jp.ones(new_data.shape[1], dtype=bool)
+    mask = mask.at[idx_right_arm].set(False)
+    
+    new_data = jp.where(mask, 0, new_data)
+    new_data = new_data.at[:, :7].set(data_for_root)
+    return new_data
+
