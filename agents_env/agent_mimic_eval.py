@@ -92,18 +92,17 @@ class HumanoidEnvTrainEval(HumanoidDiff):
     
     
     
+
+    
     def reset(self, rng: jp.ndarray) -> State:
         
         #set this as zero
         reward, done, zero = jp.zeros(3)
         #start at the initial state
-        
-        #data = self.get_reference_state(0)
-        
-        
-        qvel = jp.zeros(self.sys.nv)
-        qpos =  self.sys.qpos0
-        data = self.pipeline_init(qpos,qvel) 
+        data = self.get_reference_state(0)       
+        # qvel = jp.zeros(self.sys.nv)
+        # qpos =  self.sys.qpos0
+        # data = self.pipeline_init(qpos,qvel) 
         
         metrics = {'step_index': 0, 'pose_error': zero, 'fall': zero}
         obs = self._get_obs(data, 0)
@@ -224,9 +223,12 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         #this is for cyclic motions but I may need to fix it
         next_step_index = (current_step_inx + 1) % self.rollout_lenght
         
+        pose_error=loss_l2_relpos(global_pos_state, global_pos_ref),
+        
+        
         state.metrics.update(
             step_index=next_step_index,
-            pose_error=loss_l2_relpos(global_pos_state, global_pos_ref),
+            pose_error=pose_error,
             fall=fall,
         )
         

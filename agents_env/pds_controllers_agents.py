@@ -176,10 +176,12 @@ def stable_pd_controller_custom_trajectory(target,sys:base.System,state:State,q,
 
 
 #perfomr the stable pd controller
-def stable_pd_controller_trajectory(target,sys:base.System,state:State,q,qdot,kp_array,kd_array,time,dt):
-    #jax.debug.print("PD: {}", 3)
+def stable_pd_controller_trajectory(target_next_ref,sys:base.System,state:State,q,qdot,kp_array,kd_array,time,dt):
+    #jax.debug.print("PD trajectory ref: {}", 3)
     #this could change more when doing it with the real angles
-    target_q_next= compute_cubic_trajectory(time,target)
+    #target_q_next= compute_cubic_trajectory(time,target)
+    
+    target_q_next= target_next_ref
     
     #calculate the next q erro, this is on the paper stable pd
     #this is have dim nu
@@ -212,3 +214,49 @@ def stable_pd_controller_trajectory(target,sys:base.System,state:State,q,qdot,kp
     #now get the torque avoiding the root
     tau = -kp_array * error_pos[6:] - kd_array * angular_error[6:]
     return tau
+
+
+
+#perfomr the stable pd controller
+def stable_pd_controller_action(target,sys:base.System,state:State,q,qdot,kp_array,kd_array,time,dt):
+    #jax.debug.print("PD: {}", 3)
+    #this could change more when doing it with the real angles
+    #target_q_next= compute_cubic_trajectory(time,target)
+    
+    target_q_next= target
+    
+    #calculate the next q erro, this is on the paper stable pd
+    #this is have dim nu
+    error_q_next =(q[7:] + (qdot[6:]*dt) )-target_q_next
+    
+    #first reshape the kp and kd by adding elemnts at the beginning 6
+    #remember the size of the kp and kd is 28, and we want 34 to match
+    #the dofs nv size
+    kp_matrix = jp.concatenate([jp.zeros(6),kp_array])
+    kd_matrix = jp.concatenate([jp.zeros(6),kd_array])
+    
+    #save the angular error, that is the velocity itself
+    angular_error = qdot
+    
+    # add 6 elements to math the dim of the mass and corolis
+    error_pos = jp.concatenate([jp.zeros(6), error_q_next])
+    
+    
+    #initialize the variables for getting the acceleration equation
+    C,M,KP,KD,tau_ext=init_corolis_mass_external_diagonal(state,kp_matrix,kd_matrix)
+    #get the mass inertia matrix with the added kd dy
+    new_mass = calculate_new_mass(M,KD,dt)
+    
+    #calculate the predicted acceleration   
+    qdot_dot = compute_acceleration(error_pos,angular_error,C,tau_ext,new_mass,KP,KD)
+    
+    # add the predicted error for the qdot, and then add than on the principal equation
+    #so this is like the  next angular error on the stable pd paper
+    angular_error = angular_error + (qdot_dot*dt)
+    #now get the torque avoiding the root
+    tau = -kp_array * error_pos[6:] - kd_array * angular_error[6:]
+    return tau
+
+
+
+
