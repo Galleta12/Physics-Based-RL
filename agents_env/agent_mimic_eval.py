@@ -165,8 +165,7 @@ class HumanoidEnvTrainEval(HumanoidDiff):
     
     
     
-    def step(self, state: State, action: jp.ndarray,
-                                           custom_target,time) -> State:
+    def step(self, state: State, action: jp.ndarray) -> State:
         
         initial_idx = state.metrics['step_index']
         current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32)
@@ -184,8 +183,8 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         timeEnv = state.pipeline_state.time
         #jax.debug.print("timeEnv: {}",timeEnv)
         
-        torque = self.pd_function(custom_target,self.sys,state,qpos,qvel,
-                                 self.kp__gains,self.kd__gains,time,self.sys.dt) 
+        torque = self.pd_function(action,self.sys,state,qpos,qvel,
+                                 self.kp__gains,self.kd__gains,timeEnv,self.sys.dt) 
         
         
         data = self.pipeline_step(state.pipeline_state,torque)
@@ -233,7 +232,7 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         
         
         return state.replace(
-            pipeline_state= data, obs=obs, reward=reward
+            pipeline_state= data, obs=obs, reward=reward, done=state.metrics['fall']
         )
         
         
