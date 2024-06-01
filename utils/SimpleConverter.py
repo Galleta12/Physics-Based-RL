@@ -243,7 +243,7 @@ class SimpleConverter(object):
                 if DOF_DEF[each_joint] == 1:
                     assert 1 == len(tmp_val)
                     offset_idx += 1
-                    #grab thejoins
+                    #grab the joints
                     self.data[k, init_idx:offset_idx] = state[each_joint]
                     if k == 0:
                         tmp_vel += [0.0]

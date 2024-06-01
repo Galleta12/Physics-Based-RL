@@ -95,30 +95,30 @@ class HumanoidEnvTrain(HumanoidEnvTrainEval):
         return state
 
     
-    # def _demo_replay(self, state,ref_data_pos,current_idx)-> State:
-    #     global_pos_state = state.x.pos
-    #     #jax.debug.print("pos state: {}",global_pos_state)
-    #     #jax.debug.print("pos ref: {}",ref_data_pos)
-    #     error = loss_l2_pos(global_pos_state, ref_data_pos)
-    #     #jax.debug.print("error: {}",error)
+    def _demo_replay(self, state,ref_data_pos,current_idx)-> State:
+        global_pos_state = state.x.pos
+        #jax.debug.print("pos state: {}",global_pos_state)
+        #jax.debug.print("pos ref: {}",ref_data_pos)
+        error = loss_l2_pos(global_pos_state, ref_data_pos)
+        #jax.debug.print("error: {}",error)
         
-    #     replay = jp.where(error > self.err_threshold, jp.float32(1), jp.float32(0))
-    #     #jax.debug.print("replay: {}",replay)
-    #     #replace the ref_state data
-    #       # Define the true and false branch functions for lax.cond
-    #     def true_fun(_):
-    #         # Update state to reference state and maintain step index
-    #         return self.set_ref_state_pipeline(current_idx)
-    #         #return self.set_ref_step(current_idx,state)
+        replay = jp.where(error > self.err_threshold, jp.float32(1), jp.float32(0))
+        #jax.debug.print("replay: {}",replay)
+        #replace the ref_state data
+          # Define the true and false branch functions for lax.cond
+        def true_fun(_):
+            # Update state to reference state and maintain step index
+            return self.set_ref_state_pipeline(current_idx)
+            #return self.set_ref_step(current_idx,state)
             
 
-    #     def false_fun(_):
-    #         # Return the original state with updated metrics
-    #         return state
-    #     # Use lax.cond to conditionally switch between states
-    #     new_data = lax.cond(replay == 1, true_fun, false_fun, None)
+        def false_fun(_):
+            # Return the original state with updated metrics
+            return state
+        # Use lax.cond to conditionally switch between states
+        new_data = lax.cond(replay == 1, true_fun, false_fun, None)
         
-    #     return new_data,replay
+        return new_data,replay
         
     
         
@@ -141,7 +141,7 @@ class HumanoidEnvTrain(HumanoidEnvTrainEval):
         
         timeEnv = state.pipeline_state.time
         
-        
+        #action = action * jp.pi * 1.2
         torque = self.pd_function(action,self.sys,state,qpos,qvel,
                                  self.kp__gains,self.kd__gains,timeEnv,self.sys.dt) 
         
@@ -191,10 +191,10 @@ class HumanoidEnvTrain(HumanoidEnvTrainEval):
         #jax.debug.print("qpos: {}",data.qpos[0:3])
         
         #here the demoreplay
-        #new_data,replay=self._demo_replay(data,self.reference_x_pos[current_step_inx],current_step_inx)
+        new_data,replay=self._demo_replay(data,self.reference_x_pos[current_step_inx],current_step_inx)
 
-        # data = data.replace(qpos=new_data.qpos, qvel=new_data.qvel, q=new_data.q,qd=new_data.qd,
-        #                     xpos=new_data.xpos, xquat=new_data.xquat,x=new_data.x,xd=new_data.xd)
+        data = data.replace(qpos=new_data.qpos, qvel=new_data.qvel, q=new_data.q,qd=new_data.qd,
+                            xpos=new_data.xpos, xquat=new_data.xquat,x=new_data.x,xd=new_data.xd)
         #jax.debug.print("data time data: {}",data.time)
         
         

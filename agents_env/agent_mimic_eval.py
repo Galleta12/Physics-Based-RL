@@ -27,7 +27,6 @@ from utils import util_data
 
 from copy import deepcopy
 
-
 from .agent_env_template import HumanoidDiff
 from .losses import *
 
@@ -78,10 +77,12 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         #for now it will be the same size
         self.cycle_len = reference_trajectory_qpos.shape[0]
     
+    
+    
+    
     #set pd callback
     def set_pd_callback(self,pd_control):
         self.pd_function = pd_control
-    
     
     
     def get_reference_state(self,step_index):
@@ -144,11 +145,13 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         # jax.debug.print("linear vel{}", linear_vel.shape)
         # jax.debug.print("angular vel{}", angular_vel.shape)
         cvel = Motion(vel=data.cvel[1:, 3:], ang=data.cvel[1:, :3])        
+        
         #get the phi value 
         phi = ( current_step_inx% self.cycle_len) / self.cycle_len
         phi = jp.asarray(phi)
         #in theory it is mutiable if we do concatenate [] instead of
         #() since, one is a list and the other a tuple
+        #return jp.concatenate([relative_pos,local_rot_6D,cvel.vel.ravel(),cvel.ang.ravel(),phi[None]])
         return jp.concatenate([relative_pos,local_rot_6D,cvel.vel.ravel(),cvel.ang.ravel(),phi[None]])
    
         #just with a custom target but not selected joints
@@ -181,6 +184,9 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         #                         self.kp__gains,self.kd__gains,time,self.sys.dt) 
         timeEnv = state.pipeline_state.time
         #jax.debug.print("timeEnv: {}",timeEnv)
+        
+        
+        #action = action * jp.pi * 1.2
         
         torque = self.pd_function(action,self.sys,state,qpos,qvel,
                                  self.kp__gains,self.kd__gains,timeEnv,self.sys.dt) 
@@ -223,7 +229,7 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         #this is for cyclic motions but I may need to fix it
         next_step_index = (current_step_inx + 1) % self.rollout_lenght
         
-        pose_error=loss_l2_relpos(global_pos_state, global_pos_ref),
+        pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
         
         
         state.metrics.update(
