@@ -54,6 +54,7 @@ class HumanoidEnvTrain(HumanoidEnvTrainEval):
                  kd_gains,
                  reference_x_pos,
                  reference_x_rot,
+                 args,
                  **kwargs):
         super().__init__(reference_trajectory_qpos, 
                          reference_trajectory_qvel, 
@@ -64,8 +65,10 @@ class HumanoidEnvTrain(HumanoidEnvTrainEval):
                          kd_gains,
                          reference_x_pos,
                          reference_x_rot,
+                         args,
                          **kwargs)
-        self.err_threshold = 0.4
+        
+        self.err_threshold = args.threshold
   
     
         
@@ -85,8 +88,8 @@ class HumanoidEnvTrain(HumanoidEnvTrainEval):
         metrics = {'step_index': new_step_idx, 'pose_error': zero, 'fall': zero}
         
         obs = self._get_obs(data, new_step_idx)
-        #jax.debug.print("obs shape{}", obs.shape)
         
+        #jax.debug.print("obs shape{}", obs.shape)
         state = State(data, obs, reward, done, metrics)
         
         #update the replay with 0 index
@@ -121,66 +124,33 @@ class HumanoidEnvTrain(HumanoidEnvTrainEval):
         return new_data,replay
         
     
-        
-    #just with a custom target but not selected joints
     def step(self, state: State, action: jp.ndarray) -> State:
         
         initial_idx = state.metrics['step_index']
-        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32)
-                
-        #jax.debug.print("time ref: {}",self.new_ref_data.time)
+        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32)            
         current_state_ref = self.set_ref_state_pipeline(current_step_inx)
-    
-        
+            
         #current qpos and qvel for the torque    
         qpos = state.pipeline_state.q
         qvel = state.pipeline_state.qd
         
-        #current_state_ref_next = self.set_ref_state_pipeline(current_step_inx+1)
         
-        
+      
         timeEnv = state.pipeline_state.time
-        
-        #action = action * jp.pi * 1.2
+                  
         torque = self.pd_function(action,self.sys,state,qpos,qvel,
                                  self.kp__gains,self.kd__gains,timeEnv,self.sys.dt) 
         
-        #testing a pd controller with directly computing the ref position
-        # torque = self.pd_function(current_state_ref_next.qpos[7:],self.sys,state,qpos,qvel,
-        #                          self.kp__gains,self.kd__gains,time,self.sys.dt) 
-        
-        
-        
         data = self.pipeline_step(state.pipeline_state,torque)
-        #data = self.pipeline_init(current_state_ref.qpos, current_state_ref.qvel)
         
-        #first get the values, first value
-        global_pos_state = data.x.pos
-        #jax.debug.print("x pos state: {}",global_pos_state)
-        global_rot_state = quaternion_to_rotation_6d(data.x.rot)
-        #jax.debug.print("x rot state: {}",global_rot_state)
-        global_vel_state = data.xd.vel
-        #jax.debug.print("xd vel state: {}",global_vel_state)
-        global_ang_state = data.xd.ang
-        #jax.debug.print("xd ang state: {}",global_ang_state)
-        #now for the reference trajectory
-        global_pos_ref = self.reference_x_pos[current_step_inx]
-        #jax.debug.print("x ref pos state: {}",global_pos_ref)
-        global_rot_ref = quaternion_to_rotation_6d(self.reference_x_rot[current_step_inx])
-        #jax.debug.print("x ref rot state: {}",global_rot_ref)
-        global_vel_ref = current_state_ref.xd.vel
-        #jax.debug.print("x ref vel state: {}",global_vel_ref)
-        global_ang_ref = current_state_ref.xd.ang
-        #jax.debug.print("x ref ang state: {}",global_ang_ref)
+        #get the observations
+        obs = self._get_obs(data, current_step_inx)
         
         
-        reward = -1 * (mse_pos(global_pos_state, global_pos_ref) +
-               self.rot_weight * mse_rot(global_rot_state, global_rot_ref) +
-               self.vel_weight * mse_vel(global_vel_state, global_vel_ref) +
-               self.ang_weight * mse_ang(global_ang_state, global_ang_ref)
-               ) * self.reward_scaling
+        reward = self.compute_rewards(data,current_state_ref,current_step_inx)
         
-        #jax.debug.print("rewards: {}",reward)
+        
+        #sjax.debug.print("rewards: {}",reward)
         
         #here I will do the fall
         #on the z axis
@@ -190,92 +160,158 @@ class HumanoidEnvTrain(HumanoidEnvTrainEval):
         #jax.debug.print("fall: {}",fall)
         #jax.debug.print("qpos: {}",data.qpos[0:3])
         
-        #here the demoreplay
-        new_data,replay=self._demo_replay(data,self.reference_x_pos[current_step_inx],current_step_inx)
-
-        data = data.replace(qpos=new_data.qpos, qvel=new_data.qvel, q=new_data.q,qd=new_data.qd,
-                            xpos=new_data.xpos, xquat=new_data.xquat,x=new_data.x,xd=new_data.xd)
-        #jax.debug.print("data time data: {}",data.time)
-        
-        
-        #get the observations
-        obs = self._get_obs(data, current_step_inx)
-        
         #increment the step index to know in which episode and wrap
+        #this is for cyclic motions but I may need to fix it
         next_step_index = (current_step_inx + 1) % self.rollout_lenght
         
+        global_pos_state = data.x.pos
+        global_pos_ref = self.reference_x_pos[current_step_inx]
+        
         pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
-        #jax.debug.print("pose error {}",pose_error)
+        
         
         state.metrics.update(
             step_index=next_step_index,
             pose_error=pose_error,
             fall=fall,
-            #replay=replay
         )
         
         
         return state.replace(
             pipeline_state= data, obs=obs, reward=reward, done=state.metrics['fall']
         )
+    
+    
+    
+    
+    
+    
+    
+        
+    # #just with a custom target but not selected joints
+    # def step(self, state: State, action: jp.ndarray) -> State:
+        
+    #     initial_idx = state.metrics['step_index']
+    #     current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32)
+                
+    #     #jax.debug.print("time ref: {}",self.new_ref_data.time)
+    #     current_state_ref = self.set_ref_state_pipeline(current_step_inx)
+    
+        
+    #     #current qpos and qvel for the torque    
+    #     qpos = state.pipeline_state.q
+    #     qvel = state.pipeline_state.qd
+        
+    #     #current_state_ref_next = self.set_ref_state_pipeline(current_step_inx+1)
+        
+        
+    #     timeEnv = state.pipeline_state.time
+        
+    #     #action = action * jp.pi * 1.2
+    #     torque = self.pd_function(action,self.sys,state,qpos,qvel,
+    #                              self.kp__gains,self.kd__gains,timeEnv,self.sys.dt) 
+        
+    #     #testing a pd controller with directly computing the ref position
+    #     # torque = self.pd_function(current_state_ref_next.qpos[7:],self.sys,state,qpos,qvel,
+    #     #                          self.kp__gains,self.kd__gains,time,self.sys.dt) 
+        
+        
+        
+    #     data = self.pipeline_step(state.pipeline_state,torque)
+    #     #data = self.pipeline_init(current_state_ref.qpos, current_state_ref.qvel)
+        
+    #     #first get the values, first value
+    #     global_pos_state = data.x.pos
+    #     #jax.debug.print("x pos state: {}",global_pos_state)
+    #     global_rot_state = quaternion_to_rotation_6d(data.x.rot)
+    #     #jax.debug.print("x rot state: {}",global_rot_state)
+    #     global_vel_state = data.xd.vel
+    #     #jax.debug.print("xd vel state: {}",global_vel_state)
+    #     global_ang_state = data.xd.ang
+    #     #jax.debug.print("xd ang state: {}",global_ang_state)
+    #     #now for the reference trajectory
+    #     global_pos_ref = self.reference_x_pos[current_step_inx]
+    #     #jax.debug.print("x ref pos state: {}",global_pos_ref)
+    #     global_rot_ref = quaternion_to_rotation_6d(self.reference_x_rot[current_step_inx])
+    #     #jax.debug.print("x ref rot state: {}",global_rot_ref)
+    #     global_vel_ref = current_state_ref.xd.vel
+    #     #jax.debug.print("x ref vel state: {}",global_vel_ref)
+    #     global_ang_ref = current_state_ref.xd.ang
+    #     #jax.debug.print("x ref ang state: {}",global_ang_ref)
+        
+        
+    #     reward = -1 * (mse_pos(global_pos_state, global_pos_ref) +
+    #            self.rot_weight * mse_rot(global_rot_state, global_rot_ref) +
+    #            self.vel_weight * mse_vel(global_vel_state, global_vel_ref) +
+    #            self.ang_weight * mse_ang(global_ang_state, global_ang_ref)
+    #            ) * self.reward_scaling
+        
+    #     #jax.debug.print("rewards: {}",reward)
+        
+    #     #here I will do the fall
+    #     #on the z axis
+    #     fall = jp.where(data.qpos[2] < 0.2, jp.float32(1), jp.float32(0))
+    #     fall = jp.where(data.qpos[2] > 1.7, jp.float32(1), fall)
+        
+    #     #jax.debug.print("fall: {}",fall)
+    #     #jax.debug.print("qpos: {}",data.qpos[0:3])
+        
+    #     #here the demoreplay
+    #     new_data,replay=self._demo_replay(data,self.reference_x_pos[current_step_inx],current_step_inx)
+
+    #     data = data.replace(qpos=new_data.qpos, qvel=new_data.qvel, q=new_data.q,qd=new_data.qd,
+    #                         xpos=new_data.xpos, xquat=new_data.xquat,x=new_data.x,xd=new_data.xd)
+    #     #jax.debug.print("data time data: {}",data.time)
+        
+        
+    #     #get the observations
+    #     obs = self._get_obs(data, current_step_inx)
+        
+    #     #increment the step index to know in which episode and wrap
+    #     next_step_index = (current_step_inx + 1) % self.rollout_lenght
+        
+    #     pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
+    #     #jax.debug.print("pose error {}",pose_error)
+        
+    #     state.metrics.update(
+    #         step_index=next_step_index,
+    #         pose_error=pose_error,
+    #         fall=fall,
+    #         #replay=replay
+    #     )
+        
+        
+    #     return state.replace(
+    #         pipeline_state= data, obs=obs, reward=reward, done=state.metrics['fall']
+    #     )
         
         
     #just with a custom target but not selected joints
-    def step_custom(self, state: State, action: jp.ndarray, custom_target,time) -> State:
+    def step_custom(self, state: State, action: jp.ndarray) -> State:
         
         initial_idx = state.metrics['step_index']
-        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32)
-                
-        #jax.debug.print("time ref: {}",self.new_ref_data.time)
+        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32)            
         current_state_ref = self.set_ref_state_pipeline(current_step_inx)
-    
-        
+            
         #current qpos and qvel for the torque    
         qpos = state.pipeline_state.q
         qvel = state.pipeline_state.qd
         
-        current_state_ref_next = self.set_ref_state_pipeline(current_step_inx+1)
         
-        
-        #timeEnv = state.pipeline_state.time
-        
-        
-        # torque = self.pd_function(custom_target,self.sys,state,qpos,qvel,
-        #                          self.kp__gains,self.kd__gains,time,self.sys.dt) 
-        #testing a pd controller with directly computing the ref position
-        torque = self.pd_function(current_state_ref_next.qpos[7:],self.sys,state,qpos,qvel,
-                                 self.kp__gains,self.kd__gains,time,self.sys.dt) 
-        
-        
+      
+        timeEnv = state.pipeline_state.time
+                  
+        torque = self.pd_function(current_state_ref[7:],self.sys,state,qpos,qvel,
+                                 self.kp__gains,self.kd__gains,timeEnv,self.sys.dt) 
         
         data = self.pipeline_step(state.pipeline_state,torque)
-        #data = self.pipeline_init(current_state_ref.qpos, current_state_ref.qvel)
         
-        #first get the values, first value
-        global_pos_state = data.x.pos
-        #jax.debug.print("x pos state: {}",global_pos_state)
-        global_rot_state = quaternion_to_rotation_6d(data.x.rot)
-        #jax.debug.print("x rot state: {}",global_rot_state)
-        global_vel_state = data.xd.vel
-        #jax.debug.print("xd vel state: {}",global_vel_state)
-        global_ang_state = data.xd.ang
-        #jax.debug.print("xd ang state: {}",global_ang_state)
-        #now for the reference trajectory
-        global_pos_ref = self.reference_x_pos[current_step_inx]
-        #jax.debug.print("x ref pos state: {}",global_pos_ref)
-        global_rot_ref = quaternion_to_rotation_6d(self.reference_x_rot[current_step_inx])
-        #jax.debug.print("x ref rot state: {}",global_rot_ref)
-        global_vel_ref = current_state_ref.xd.vel
-        #jax.debug.print("x ref vel state: {}",global_vel_ref)
-        global_ang_ref = current_state_ref.xd.ang
-        #jax.debug.print("x ref ang state: {}",global_ang_ref)
+        #get the observations
+        obs = self._get_obs(data, current_step_inx)
         
         
-        reward = -1 * (mse_pos(global_pos_state, global_pos_ref) +
-               self.rot_weight * mse_rot(global_rot_state, global_rot_ref) +
-               self.vel_weight * mse_vel(global_vel_state, global_vel_ref) +
-               self.ang_weight * mse_ang(global_ang_state, global_ang_ref)
-               ) * self.reward_scaling
+        reward = self.compute_rewards(data,current_state_ref,current_step_inx)
+        
         
         jax.debug.print("rewards: {}",reward)
         
@@ -284,36 +320,27 @@ class HumanoidEnvTrain(HumanoidEnvTrainEval):
         fall = jp.where(data.qpos[2] < 0.2, jp.float32(1), jp.float32(0))
         fall = jp.where(data.qpos[2] > 1.7, jp.float32(1), fall)
         
-        #jax.debug.print("fall: {}",fall)
+        jax.debug.print("fall: {}",fall)
         #jax.debug.print("qpos: {}",data.qpos[0:3])
         
-        #here the demoreplay
-        #new_data,replay=self._demo_replay(data,self.reference_x_pos[current_step_inx],current_step_inx)
-
-        # data = data.replace(qpos=new_data.qpos, qvel=new_data.qvel, q=new_data.q,qd=new_data.qd,
-        #                     xpos=new_data.xpos, xquat=new_data.xquat,x=new_data.x,xd=new_data.xd)
-        #jax.debug.print("data time data: {}",data.time)
-        
-        
-        #get the observations
-        obs = self._get_obs(data, current_step_inx)
-        
         #increment the step index to know in which episode and wrap
+        #this is for cyclic motions but I may need to fix it
         next_step_index = (current_step_inx + 1) % self.rollout_lenght
         
+        global_pos_state = data.x.pos
+        global_pos_ref = self.reference_x_pos[current_step_inx]
+        
         pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
-        #jax.debug.print("pose error {}",pose_error)
+        
         
         state.metrics.update(
             step_index=next_step_index,
             pose_error=pose_error,
             fall=fall,
-            #replay=replay
         )
-        
         
         return state.replace(
             pipeline_state= data, obs=obs, reward=reward, done=state.metrics['fall']
         )
-        
+    
         

@@ -53,6 +53,7 @@ class HumanoidEnvTrainEval(HumanoidDiff):
                  kd_gains,
                  reference_x_pos,
                  reference_x_rot,
+                 args,
                  **kwargs):
         super().__init__(reference_trajectory_qpos, 
                          reference_trajectory_qvel, 
@@ -70,16 +71,14 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         self.reference_x_rot = reference_x_rot
 
         #for now this will be hardcode
-        self.rot_weight =  0.5
-        self.vel_weight =  0.01
-        self.ang_weight =  0.01
-        self.reward_scaling= 0.02
+        self.rot_weight =  args.rot_weight
+        self.vel_weight =  args.vel_weight
+        self.ang_weight =  args.ang_weight
+        self.reward_scaling= args.reward_scaling
         #for now it will be the same size
-        self.cycle_len = reference_trajectory_qpos.shape[0]
-    
-    
-    
-    
+        self.cycle_len = args.cycle_len if args.cycle_len is not 0 else reference_trajectory_qpos.shape[0]  
+
+ 
     #set pd callback
     def set_pd_callback(self,pd_control):
         self.pd_function = pd_control
@@ -91,10 +90,13 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         #now I will return a state depending on the index and the reference trajectory
         return self.pipeline_init(ref_qp,ref_qv)
     
-    
-    
-
-    
+    def set_ref_state_pipeline(self,step_index):
+        ref_qp = self.reference_trajectory_qpos[step_index]
+        ref_qv = self.reference_trajectory_qvel[step_index]
+        #now I will return a state depending on the index and the reference trajectory
+        return self._pipeline.init(self.sys_reference, ref_qp, ref_qv, self._debug)
+        
+        
     def reset(self, rng: jp.ndarray) -> State:
         
         #set this as zero
@@ -108,7 +110,6 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         metrics = {'step_index': 0, 'pose_error': zero, 'fall': zero}
         obs = self._get_obs(data, 0)
         
-        #jax.debug.print("obs shape{}", obs.shape)
         #size 193
         state = State(data, obs, reward, done, metrics)
            
@@ -120,58 +121,79 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         #we take out the first index that is the world pos
         current_xpos = data.xpos[1:]
         current_xrot = data.xquat[1:]
+        #jax.debug.print("rot{}", current_xrot.shape)
+        
         #get rid of the first index that is the root, we just want
         #pos relative to the root, thus the root will become zero
         relative_pos = (current_xpos - current_xpos[0])[1:].ravel()
         #jax.debug.print("relative shape{}", relative_pos.shape)
         
-        #this is already in quat form
-        current_qpos_root = data.qpos[3:7]
-        #qpos of the joins this are scale values, since they are hinge joints
-        current_qpos_joints = data.qpos[7:] 
-        #now I will convert them into quaterions
-        #first the joints that are onedofs, thus axis angle to quaterion
-        hinge_quat = self.hinge_to_quat(current_qpos_joints)
-        #now to get a 13x4 quaterion, we combine all the links
-    
-        local_quat = self.local_quat(current_qpos_root,current_xrot,hinge_quat,self.one_dofs_joints_idx,self.link_types_array_without_root)
+        
+        vel = data.xd.vel
+        ang = data.xd.ang
+        #jax.debug.print("vel{}", vel)
+        #jax.debug.print("ang{}", ang)
+        
         
         #now we convert it to a 6D matrix representation
-        local_rot_6D= quaternion_to_rotation_6d(local_quat).ravel()
+        rot_6D= quaternion_to_rotation_6d(current_xrot).ravel()
         
-        # #remeber for now we have the linear vel of the root
-        # linear_vel = data.qvel[0:3]
-        # angular_vel = data.qvel[3:]
-        # jax.debug.print("linear vel{}", linear_vel.shape)
-        # jax.debug.print("angular vel{}", angular_vel.shape)
-        cvel = Motion(vel=data.cvel[1:, 3:], ang=data.cvel[1:, :3])        
         
         #get the phi value 
         phi = ( current_step_inx% self.cycle_len) / self.cycle_len
         phi = jp.asarray(phi)
-        #in theory it is mutiable if we do concatenate [] instead of
-        #() since, one is a list and the other a tuple
-        #return jp.concatenate([relative_pos,local_rot_6D,cvel.vel.ravel(),cvel.ang.ravel(),phi[None]])
-        return jp.concatenate([relative_pos,local_rot_6D,cvel.vel.ravel(),cvel.ang.ravel(),phi[None]])
+        
+        return jp.concatenate([relative_pos,rot_6D,vel.ravel(),ang.ravel(),phi[None]])
+   
+    # def _get_obs(self, data: mjx.Data, step_idx: jp.ndarray)-> jp.ndarray:
+          
+    #     current_step_inx =  jp.asarray(step_idx, dtype=jp.int32)
+    #     #we take out the first index that is the world pos
+    #     current_xpos = data.xpos[1:]
+    #     current_xrot = data.xquat[1:]
+    #     #get rid of the first index that is the root, we just want
+    #     #pos relative to the root, thus the root will become zero
+    #     relative_pos = (current_xpos - current_xpos[0])[1:].ravel()
+    #     #jax.debug.print("relative shape{}", relative_pos.shape)
+        
+    #     #this is already in quat form
+    #     current_qpos_root = data.qpos[3:7]
+    #     #qpos of the joins this are scale values, since they are hinge joints
+    #     current_qpos_joints = data.qpos[7:] 
+    #     #now I will convert them into quaterions
+    #     #first the joints that are onedofs, thus axis angle to quaterion
+    #     hinge_quat = self.hinge_to_quat(current_qpos_joints)
+    #     #now to get a 13x4 quaterion, we combine all the links
+    
+    #     local_quat = self.local_quat(current_qpos_root,current_xrot,hinge_quat,self.one_dofs_joints_idx,self.link_types_array_without_root)
+        
+    #     #now we convert it to a 6D matrix representation
+    #     local_rot_6D= quaternion_to_rotation_6d(local_quat).ravel()
+        
+    #     # #remeber for now we have the linear vel of the root
+    #     # linear_vel = data.qvel[0:3]
+    #     # angular_vel = data.qvel[3:]
+    #     # jax.debug.print("linear vel{}", linear_vel.shape)
+    #     # jax.debug.print("angular vel{}", angular_vel.shape)
+    #     cvel = Motion(vel=data.cvel[1:, 3:], ang=data.cvel[1:, :3])        
+        
+    #     #get the phi value 
+    #     phi = ( current_step_inx% self.cycle_len) / self.cycle_len
+    #     phi = jp.asarray(phi)
+    #     #in theory it is mutiable if we do concatenate [] instead of
+    #     #() since, one is a list and the other a tuple
+    #     #return jp.concatenate([relative_pos,local_rot_6D,cvel.vel.ravel(),cvel.ang.ravel(),phi[None]])
+    #     return jp.concatenate([relative_pos,local_rot_6D,cvel.vel.ravel(),cvel.ang.ravel(),phi[None]])
    
         #just with a custom target but not selected joints
     
-    
-     
-    def set_ref_state_pipeline(self,step_index):
-        ref_qp = self.reference_trajectory_qpos[step_index]
-        ref_qv = self.reference_trajectory_qvel[step_index]
-        #now I will return a state depending on the index and the reference trajectory
-        return self._pipeline.init(self.sys_reference, ref_qp, ref_qv, self._debug)
-        
     
     
     
     def step(self, state: State, action: jp.ndarray) -> State:
         
         initial_idx = state.metrics['step_index']
-        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32)
-                
+        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32)            
         current_state_ref = self.set_ref_state_pipeline(current_step_inx)
             
         #current qpos and qvel for the torque    
@@ -179,37 +201,22 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         qvel = state.pipeline_state.qd
         
         
-        #this will be modified by a one without custom target   
-        #torque = self.pd_function(custom_target,self.sys,state,qpos,qvel,
-        #                         self.kp__gains,self.kd__gains,time,self.sys.dt) 
+      
         timeEnv = state.pipeline_state.time
         #jax.debug.print("timeEnv: {}",timeEnv)
-        
-        
-        #action = action * jp.pi * 1.2
+          
         
         torque = self.pd_function(action,self.sys,state,qpos,qvel,
                                  self.kp__gains,self.kd__gains,timeEnv,self.sys.dt) 
         
-        
         data = self.pipeline_step(state.pipeline_state,torque)
         
-        #first get the values, values of the current state
-        global_pos_state = data.x.pos
-        global_rot_state = quaternion_to_rotation_6d(data.x.rot)
-        global_vel_state = data.xd.vel
-        global_ang_state = data.xd.ang
-        #now for the reference trajectory
-        global_pos_ref = self.reference_x_pos[current_step_inx]
-        global_rot_ref = quaternion_to_rotation_6d(self.reference_x_rot[current_step_inx])
-        global_vel_ref = current_state_ref.xd.vel
-        global_ang_ref = current_state_ref.xd.ang
+        #get the observations
+        obs = self._get_obs(data, current_step_inx)
         
-        reward = -1 * (mse_pos(global_pos_state, global_pos_ref) +
-               self.rot_weight * mse_rot(global_rot_state, global_rot_ref) +
-               self.vel_weight * mse_vel(global_vel_state, global_vel_ref) +
-               self.ang_weight * mse_ang(global_ang_state, global_ang_ref)
-               ) * self.reward_scaling
+        
+        reward = self.compute_rewards(data,current_state_ref,current_step_inx)
+        
         
         #jax.debug.print("rewards: {}",reward)
         
@@ -222,12 +229,12 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         #jax.debug.print("qpos: {}",data.qpos[0:3])
         
         
-        #get the observations
-        obs = self._get_obs(data, current_step_inx)
-        
         #increment the step index to know in which episode and wrap
         #this is for cyclic motions but I may need to fix it
         next_step_index = (current_step_inx + 1) % self.rollout_lenght
+        
+        global_pos_state = data.x.pos
+        global_pos_ref = self.reference_x_pos[current_step_inx]
         
         pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
         
@@ -242,5 +249,26 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         return state.replace(
             pipeline_state= data, obs=obs, reward=reward, done=state.metrics['fall']
         )
+    
+    
+    
+    def compute_rewards(self, data,current_state_ref,current_step_inx):
+        global_pos_state = data.x.pos
+        global_rot_state = quaternion_to_rotation_6d(data.x.rot)
+        global_vel_state = data.xd.vel
+        global_ang_state = data.xd.ang
+        #now for the reference trajectory
+        global_pos_ref = self.reference_x_pos[current_step_inx]
+        global_rot_ref = quaternion_to_rotation_6d(self.reference_x_rot[current_step_inx])
+        global_vel_ref = current_state_ref.xd.vel
+        global_ang_ref = current_state_ref.xd.ang
+        
+        
+        
+        return -1 * (mse_pos(global_pos_state, global_pos_ref) +
+               self.rot_weight * mse_rot(global_rot_state, global_rot_ref) +
+               self.vel_weight * mse_vel(global_vel_state, global_vel_ref) +
+               self.ang_weight * mse_ang(global_ang_state, global_ang_ref)
+               ) * self.reward_scaling
         
         
