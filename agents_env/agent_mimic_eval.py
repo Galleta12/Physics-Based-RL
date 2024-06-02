@@ -76,8 +76,11 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         self.ang_weight =  args.ang_weight
         self.reward_scaling= args.reward_scaling
         #for now it will be the same size
-        self.cycle_len = args.cycle_len if args.cycle_len is not 0 else reference_trajectory_qpos.shape[0]  
+        self.cycle_len = args.cycle_len if args.cycle_len !=0 else reference_trajectory_qpos.shape[0]  
 
+
+        
+        
  
     #set pd callback
     def set_pd_callback(self,pd_control):
@@ -91,8 +94,12 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         return self.pipeline_init(ref_qp,ref_qv)
     
     def set_ref_state_pipeline(self,step_index):
+        
+        
         ref_qp = self.reference_trajectory_qpos[step_index]
         ref_qv = self.reference_trajectory_qvel[step_index]
+        
+                
         #now I will return a state depending on the index and the reference trajectory
         return self._pipeline.init(self.sys_reference, ref_qp, ref_qv, self._debug)
         
@@ -140,8 +147,10 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         
         
         #get the phi value 
-        phi = ( current_step_inx% self.cycle_len) / self.cycle_len
+        phi = ( current_step_inx % self.cycle_len) / self.cycle_len
+        
         phi = jp.asarray(phi)
+        
         
         return jp.concatenate([relative_pos,rot_6D,vel.ravel(),ang.ravel(),phi[None]])
    
@@ -194,27 +203,30 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         
         initial_idx = state.metrics['step_index']
         current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32)            
+                
+        #get the reference state
         current_state_ref = self.set_ref_state_pipeline(current_step_inx)
             
         #current qpos and qvel for the torque    
         qpos = state.pipeline_state.q
         qvel = state.pipeline_state.qd
         
-        
+        #current_state_ref_next = self.set_ref_state_pipeline(current_step_inx+1)
       
         timeEnv = state.pipeline_state.time
-        #jax.debug.print("timeEnv: {}",timeEnv)
-          
-        
+                  
         torque = self.pd_function(action,self.sys,state,qpos,qvel,
                                  self.kp__gains,self.kd__gains,timeEnv,self.sys.dt) 
         
+        #perform the physics step
+        #data = self.pipeline_init(current_state_ref.qpos, current_state_ref.qvel)
         data = self.pipeline_step(state.pipeline_state,torque)
+        
         
         #get the observations
         obs = self._get_obs(data, current_step_inx)
         
-        
+        #compute the rewards
         reward = self.compute_rewards(data,current_state_ref,current_step_inx)
         
         
@@ -229,14 +241,19 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         #jax.debug.print("qpos: {}",data.qpos[0:3])
         
         
-        #increment the step index to know in which episode and wrap
-        #this is for cyclic motions but I may need to fix it
-        next_step_index = (current_step_inx + 1) % self.rollout_lenght
-        
+        #get the relative pose error
         global_pos_state = data.x.pos
-        global_pos_ref = self.reference_x_pos[current_step_inx]
-        
+        #global_pos_ref = self.reference_x_pos[current_step_inx]
+        global_pos_ref = current_state_ref.x.pos
+              
         pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
+        
+        #jax.debug.print("pose_error: {}",pose_error)
+        
+        
+        #increment the step index to know in which episode and wrap
+        #this is for cyclic motions but I may need to fix it      
+        next_step_index = (current_step_inx + 1) % self.rollout_lenght
         
         
         state.metrics.update(
@@ -245,23 +262,38 @@ class HumanoidEnvTrainEval(HumanoidDiff):
             fall=fall,
         )
         
-        
         return state.replace(
             pipeline_state= data, obs=obs, reward=reward, done=state.metrics['fall']
         )
     
+        
     
     
     def compute_rewards(self, data,current_state_ref,current_step_inx):
+        
+        
         global_pos_state = data.x.pos
         global_rot_state = quaternion_to_rotation_6d(data.x.rot)
+                
         global_vel_state = data.xd.vel
         global_ang_state = data.xd.ang
+        
+        
         #now for the reference trajectory
-        global_pos_ref = self.reference_x_pos[current_step_inx]
-        global_rot_ref = quaternion_to_rotation_6d(self.reference_x_rot[current_step_inx])
-        global_vel_ref = current_state_ref.xd.vel
+        global_pos_ref = current_state_ref.x.pos
+        global_rot_ref = quaternion_to_rotation_6d(current_state_ref.x.rot)
+        
+        
+        global_vel_ref = current_state_ref.xd.vel        
         global_ang_ref = current_state_ref.xd.ang
+        
+        
+        
+        # jax.debug.print("rot weight: {}",self.rot_weight)
+        # jax.debug.print("vel weight: {}",self.vel_weight)
+        # jax.debug.print("ang weight: {}",self.ang_weight)
+        # jax.debug.print("reward scaling: {}",self.reward_scaling)
+        
         
         
         
