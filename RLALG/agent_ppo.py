@@ -177,9 +177,13 @@ def train(
   env_step_per_training_step = (
       batch_size * unroll_length * num_minibatches * action_repeat)
   num_evals_after_init = max(num_evals - 1, 1)
+  
+  print("num of eval after init", num_evals_after_init)
   # The number of training_step calls per training_epoch call.
   # equals to ceil(num_timesteps / (num_evals * env_step_per_training_step *
   #                                 num_resets_per_eval))
+  print("env step per traning step", env_step_per_training_step)
+  
   num_training_steps_per_epoch = np.ceil(
       num_timesteps
       / (
@@ -188,6 +192,9 @@ def train(
           * max(num_resets_per_eval, 1)
       )
   ).astype(int)
+
+  print("training steps per epoch", num_training_steps_per_epoch)
+
 
   key = jax.random.PRNGKey(seed)
   global_key, local_key = jax.random.split(key)
@@ -215,12 +222,14 @@ def train(
   else:
     wrap_for_training = envs_v1.wrappers.wrap_for_training
 
+  
   env = wrap_for_training(
       environment,
       episode_length=episode_length,
       action_repeat=action_repeat,
       randomization_fn=v_randomization_fn,
   )
+  print("Episode lenght", env.episode_length)
 
   reset_fn = jax.jit(jax.vmap(env.reset))
   key_envs = jax.random.split(key_env, num_envs // process_count)

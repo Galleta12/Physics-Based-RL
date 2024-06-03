@@ -136,14 +136,26 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         #jax.debug.print("relative shape{}", relative_pos.shape)
         
         
-        vel = data.xd.vel
-        ang = data.xd.ang
-        #jax.debug.print("vel{}", vel)
-        #jax.debug.print("ang{}", ang)
-        
         
         #now we convert it to a 6D matrix representation
-        rot_6D= quaternion_to_rotation_6d(current_xrot).ravel()
+        #rotation in root frame
+        #the zero position is the world body, the first idx is the root
+        root_relative = self.root_quat(data.xquat[1],current_xrot)
+        
+        #jax.debug.print("rotation relative{}", root_relative)
+        
+        
+        rot_6D= quaternion_to_rotation_6d(root_relative).ravel()
+        
+        
+        cvel = Motion(vel=data.cvel[1:, 3:], ang=data.cvel[1:, :3])        
+        
+        vel = cvel.vel
+        ang = cvel.ang
+        # vel = data.xd.vel
+        # ang = data.xd.ang
+        #jax.debug.print("vel{}", vel)
+        #jax.debug.print("ang{}", ang)
         
         
         #get the phi value 
@@ -202,7 +214,7 @@ class HumanoidEnvTrainEval(HumanoidDiff):
     def step(self, state: State, action: jp.ndarray) -> State:
         
         initial_idx = state.metrics['step_index']
-        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32)            
+        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32) +1          
                 
         #get the reference state
         current_state_ref = self.set_ref_state_pipeline(current_step_inx)
@@ -215,6 +227,8 @@ class HumanoidEnvTrainEval(HumanoidDiff):
       
         timeEnv = state.pipeline_state.time
                   
+        
+        target_angle = action * jp.pi * 1.2
         torque = self.pd_function(action,self.sys,state,qpos,qvel,
                                  self.kp__gains,self.kd__gains,timeEnv,self.sys.dt) 
         
@@ -239,7 +253,9 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         
         #jax.debug.print("fall: {}",fall)
         #jax.debug.print("qpos: {}",data.qpos[0:3])
-        
+        #done = jp.where(current_step_inx >= self.rollout_lenght-1, jp.float32(1), jp.float32(0))
+        #now check if fall is true or no
+        #done = jp.where(fall>=1, fall, done)
         
         #get the relative pose error
         global_pos_state = data.x.pos
@@ -253,11 +269,11 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         
         #increment the step index to know in which episode and wrap
         #this is for cyclic motions but I may need to fix it      
-        next_step_index = (current_step_inx + 1) % self.rollout_lenght
-        
+        #next_step_index = (current_step_inx + 1) % self.rollout_lenght
+        #next_step_index = (current_step_inx + 1)        
         
         state.metrics.update(
-            step_index=next_step_index,
+            step_index=current_step_inx,
             pose_error=pose_error,
             fall=fall,
         )
@@ -265,6 +281,9 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         return state.replace(
             pipeline_state= data, obs=obs, reward=reward, done=state.metrics['fall']
         )
+        # return state.replace(
+        #     pipeline_state= data, obs=obs, reward=reward, done=done
+        # )
     
         
     

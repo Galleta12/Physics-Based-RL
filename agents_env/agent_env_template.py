@@ -117,6 +117,23 @@ class HumanoidDiff(PipelineEnv):
         return hinge_quat
     
     
+    #relative root quaternion
+    def root_quat(self,current_root, current_joints):
+        
+        
+        
+        inverse_root = quat_inv(current_root)
+        
+        #jax.debug.print("iverse root{}", inverse_root)
+        
+        #relativite_root_rot = quat_mul(current_root,inverse_root)
+        batch_quaternion_multiply = jax.vmap(quat_mul, in_axes=(None, 0))
+        
+        relativite_root_rot = batch_quaternion_multiply(inverse_root,current_joints)
+        
+        return relativite_root_rot
+    
+    
     #@partial(jit, static_argnums=(1, 3,))
     def local_quat(self,current_root_rot,current_x_quat,hinge_quat,one_dofs_joints_idx, link_types_array_without_root):
         # Mask to filter out the quaternions that are not to be combined in triples
