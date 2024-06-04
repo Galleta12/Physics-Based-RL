@@ -81,6 +81,7 @@ class HumanoidEvalTemplate(HumanoidTemplate):
                                  self.kp_gains,self.kd_gains,timeEnv,self.sys.dt) 
         
         data = self.pipeline_step(state.pipeline_state,torque)
+        #data = self.pipeline_init(current_state_ref.qpos, current_state_ref.qvel)
         
         
         #get the observations
@@ -103,6 +104,8 @@ class HumanoidEvalTemplate(HumanoidTemplate):
             fall=fall,
         )
         
+        
+        
         return state.replace(
             pipeline_state= data, obs=obs, reward=reward, done=state.metrics['fall']
         )
@@ -114,7 +117,7 @@ class HumanoidEvalTemplate(HumanoidTemplate):
     def step_custom(self, state: State, action: jp.ndarray) -> State:
         initial_idx = state.metrics['step_index']
         current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32) + 1
-        
+        #jax.debug.print("current step idx{}", current_step_inx)
         current_state_ref = self.set_ref_state_pipeline(current_step_inx)
     
         #current qpos and qvel for the torque    
