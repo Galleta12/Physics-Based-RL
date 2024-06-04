@@ -230,6 +230,8 @@ def train(
       randomization_fn=v_randomization_fn,
   )
   print("Episode lenght", env.episode_length)
+  print("Obs size", env.observation_size)
+  
 
   reset_fn = jax.jit(jax.vmap(env.reset))
   key_envs = jax.random.split(key_env, num_envs // process_count)

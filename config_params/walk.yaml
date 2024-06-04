@@ -8,7 +8,7 @@ system_config: humanoid
 demo_replay_mode: threshold
 threshold: 0.4
 normalize_observations: True
-cycle_len: 54
+cycle_len: 0
 ep_len: 30
 ep_len_eval: 54
 use_lr_scheduler: True

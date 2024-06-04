@@ -165,7 +165,7 @@ class HumanoidEnvTrainEval(HumanoidDiff):
         
         
         return jp.concatenate([relative_pos,rot_6D,vel.ravel(),ang.ravel(),phi[None]])
-   
+    
     # def _get_obs(self, data: mjx.Data, step_idx: jp.ndarray)-> jp.ndarray:
           
     #     current_step_inx =  jp.asarray(step_idx, dtype=jp.int32)
@@ -206,7 +206,7 @@ class HumanoidEnvTrainEval(HumanoidDiff):
     #     #return jp.concatenate([relative_pos,local_rot_6D,cvel.vel.ravel(),cvel.ang.ravel(),phi[None]])
     #     return jp.concatenate([relative_pos,local_rot_6D,cvel.vel.ravel(),cvel.ang.ravel(),phi[None]])
    
-        #just with a custom target but not selected joints
+    #     just with a custom target but not selected joints
     
     
     
