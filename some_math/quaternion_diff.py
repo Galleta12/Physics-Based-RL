@@ -41,15 +41,20 @@ def quat_abs(x):
     """
     quaternion norm (unit quaternion represents a 3D rotation, which has norm of 1)
     """
-    x = jp.safe_norm(x, axis=-1)
+    #x = jp.safe_norm(x, axis=-1)
+    
+    x = jp.linalg.norm(x, axis=-1)  # Use linalg.norm instead of safe_norm
+    
     return x
 
 def quat_unit(x):
     """
     normalized quaternion with norm of 1
     """
+    
     norm = quat_abs(x)[..., None]
     norm = jp.clip(norm, a_min=jp.ones_like(norm) * 1e-9, a_max=jp.ones_like(norm) * 1e9)
+    
     return x / norm
 
 def quat_conjugate(x):

@@ -92,6 +92,12 @@ class HumanoidTemplate(PipelineEnv):
         self.cycle_len = args.cycle_len if args.cycle_len !=0 else self.rollout_lenght  
 
         
+        #ind for the end-effect reward of deepmimic
+        #this is located on the geom_xpos
+        #right_wrist,left_writst,right_ankle,left_ankle
+        #the geom_xpos has a shape of 16x3
+        self.dict_ee = jp.array([6,9,12,15])
+        
         
         
     def set_pd_callback(self,pd_control):
@@ -214,7 +220,13 @@ class HumanoidTemplate(PipelineEnv):
             self.ang_weight * mse_ang(global_ang_state, global_ang_ref)
             ) * self.reward_scaling
             
-            
+    
+    
+    def compute_rewards_deepmimic(self,data,current_state_ref):
+        
+        pass
+    
+     
     
     #standard obs this will changed on other derived
     #classes from this

@@ -17,4 +17,15 @@ rot_weight: 0.5
 vel_weight: 0.01
 ang_weight: 0.01
 
+reward_weights:
+  w_p: 0.6
+  w_v: 0.1
+  w_e: 0.2
+  w_c: 0.1
+
+
+
+
+
+
 ref: motions/humanoid3d_punch.txt
