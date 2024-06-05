@@ -28,7 +28,7 @@ from utils import util_data
 from utils import SimpleConverter
 from some_math.math_utils_jax import *
 from copy import deepcopy
-
+from etils import epath
 import sys
 import os
 from .losses import *
@@ -52,7 +52,7 @@ class HumanoidTemplate(PipelineEnv):
       **kwargs,
     ):
         
-        path = model_path
+        path = epath.Path(model_path).as_posix()
         mj_model = mujoco.MjModel.from_xml_path(path)
         
         sys = mjcf.load_model(mj_model)
@@ -60,8 +60,11 @@ class HumanoidTemplate(PipelineEnv):
         
         self._dt = 1/60
         optimal_timestep = self._dt/5  
-        sys = sys.tree_replace({'opt.timestep': 0.002, 'dt': 0.002})
+        
+        sys = sys.tree_replace({'opt.timestep': 0.002})
+        
         n_frames = kwargs.pop('n_frames', int(self._dt / 0.002))
+        
         super().__init__(sys, backend='mjx', n_frames=n_frames)
         
         #this is to keep separate the sys of the agent
