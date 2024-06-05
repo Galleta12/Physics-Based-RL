@@ -3,7 +3,8 @@ mediapy==1.2.0
 opencv-python==4.9.0.80
 ffmpeg-python==0.2.0
 brax==0.10.3
-mujoco==3.1.3
+#I will use this and see what happen 0.10.4
+mujoco==3.1.3 
 matplotlib==3.8.4
 pyquaternion==0.9.9
 python-box==7.1.1

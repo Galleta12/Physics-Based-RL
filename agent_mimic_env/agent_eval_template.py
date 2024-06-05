@@ -168,8 +168,8 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         current_step_inx =  jp.asarray(step_idx, dtype=jp.int32)
         
         
-        #relative_pos , local_rotations,local_vel,local_ang = self.convert_local(data)
-        relative_pos , local_rotations,local_vel,local_ang = self.convertLocaDiff(data)
+        relative_pos , local_rotations,local_vel,local_ang = self.convert_local(data)
+        #relative_pos , local_rotations,local_vel,local_ang = self.convertLocaDiff(data)
         
         relative_pos = relative_pos[1:]
         #q_relative_pos,q_local_rotations, q_local_vel, q_local_ang = self.convertLocaDiff(data)
@@ -221,9 +221,9 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         #this is relative to the root
         local_positions, local_rotations,local_vel,local_ang = jax.vmap(transform_to_root_local)(data.x.pos, data.x.rot,data.xd.vel,data.xd.ang)
         #get rid of the zero  root pos
-        relative_pos = local_positions[1:]
+        #relative_pos = local_positions[1:]
         
-        return relative_pos,local_rotations,local_vel,local_ang
+        return  local_positions,local_rotations,local_vel,local_ang
 
     
     

@@ -61,6 +61,7 @@ class HumanoidTemplate(PipelineEnv):
         self._dt = 1/60
         optimal_timestep = self._dt/5  
         sys = sys.tree_replace({'opt.timestep': 0.002, 'dt': 0.002})
+        #sys = sys.tree_replace({'opt.timestep': 0.002})
         n_frames = kwargs.pop('n_frames', int(self._dt / 0.002))
         super().__init__(sys, backend='mjx', n_frames=n_frames)
         

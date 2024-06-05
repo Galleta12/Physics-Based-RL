@@ -6,7 +6,7 @@ max_grad_norm: 0.4
 seed: 0
 system_config: humanoid
 demo_replay_mode: threshold
-threshold: 0.5
+threshold: 1.5
 normalize_observations: True
 cycle_len: 0
 ep_len: 30
