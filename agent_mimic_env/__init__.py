@@ -14,8 +14,8 @@ sys.path.append(parent_dir)
 from utils.SimpleConverter import SimpleConverter
 
 
-#def register_mimic_env(args) -> Tuple[HumanoidTemplate,HumanoidEvalTemplate,HumanoidTrainTemplate]:
-def register_mimic_env(args) -> HumanoidTemplate:
+def register_mimic_env(args) -> Tuple[HumanoidTemplate,HumanoidEvalTemplate,HumanoidTrainTemplate]:
+#def register_mimic_env(args) -> HumanoidTemplate:
         
     trajectory = SimpleConverter(args.ref)
     trajectory.load_mocap()
@@ -26,18 +26,18 @@ def register_mimic_env(args) -> HumanoidTemplate:
     env_replay_name = 'humanoidEnvReplay'
     env_replay = generate_env_replay(trajectory,model_path,env_replay_name,args)
     
-    # envs.register_environment('humanoidEnvEval',HumanoidEvalTemplate)
-    # env_eval_name = 'humanoidEnvEval'
-    # env_eval = generate_env_eval(trajectory,model_path,env_eval_name,args)
+    envs.register_environment('humanoidEnvEval',HumanoidEvalTemplate)
+    env_eval_name = 'humanoidEnvEval'
+    env_eval = generate_env_eval(trajectory,model_path,env_eval_name,args)
     
     
-    # envs.register_environment('humanoidEnvTrain',HumanoidTrainTemplate)
-    # env_name = 'humanoidEnvTrain'
-    # env = generate_env_train(trajectory,model_path,env_name,args)
+    envs.register_environment('humanoidEnvTrain',HumanoidTrainTemplate)
+    env_name = 'humanoidEnvTrain'
+    env = generate_env_train(trajectory,model_path,env_name,args)
     
      
-    #return env_replay,env_eval,env
-    return env_replay
+    return env_replay,env_eval,env
+    #return env_replay
 
 
 

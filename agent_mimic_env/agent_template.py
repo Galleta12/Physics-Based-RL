@@ -14,6 +14,7 @@ from brax.mjx.base import State as MjxState
 from brax.training.agents.ppo import train as ppo
 from brax.training.agents.ppo import networks as ppo_networks
 from brax.io import html, mjcf, model
+from brax.mjx.pipeline import _reformat_contact
 from etils import epath
 from flax import struct
 from matplotlib import pyplot as plt
@@ -41,7 +42,7 @@ from some_math.rotation6D import quaternion_to_rotation_6d
 from some_math.math_utils_jax import *
 from utils.SimpleConverter import SimpleConverter
 from utils.util_data import generate_kp_kd_gains
-
+import some_math.quaternion_diff as diff_quat
 
 class HumanoidTemplate(PipelineEnv):
     def __init__(
@@ -108,7 +109,7 @@ class HumanoidTemplate(PipelineEnv):
     
     
     #get a reference state from the referece trajectory
-    #this is used on the reset
+    #this is used on the reset only on the reset
     def get_reference_state(self,step_index):
         ref_qp = self.reference_trajectory_qpos[step_index]
         ref_qv = self.reference_trajectory_qvel[step_index]
@@ -118,11 +119,17 @@ class HumanoidTemplate(PipelineEnv):
     #set the reference state during the steps
     #this is imporant, since we keep two states at the same time
     #this will use its own sys
-    def set_ref_state_pipeline(self,step_index):
+    def set_ref_state_pipeline(self,step_index,data:mjx.Data):
         ref_qp = self.reference_trajectory_qpos[step_index]
-        ref_qv = self.reference_trajectory_qvel[step_index]        
+        ref_qv = self.reference_trajectory_qvel[step_index]
+        #calculate the position of the refernece motion with forward kinematics
+        # ref_data = data.replace(qpos=ref_qp,qvel=ref_qv)
+        # ref_data = mjx.forward(self.sys, ref_data)
+        
+        # return ref_data
         #now I will return a state depending on the index and the reference trajectory
         return self._pipeline.init(self.sys_reference, ref_qp, ref_qv, self._debug)
+        
     
     
     #the standard reset for all the agents derived from this class
@@ -138,41 +145,72 @@ class HumanoidTemplate(PipelineEnv):
         
         metrics = {'step_index': 0, 'pose_error': zero, 'fall': zero}
         obs = self._get_obs(data, 0)    
-        
         #jax.debug.print("obs: {}",obs.shape)
-        
         #the obs should be size 193?
-        state = State(data, obs, reward, done, metrics)
+        
+        ref_qp = self.reference_trajectory_qpos[0]
+        
+        
+        state_info = {
+            'rng': rng,
+            'steps': 0.0,
+            'reward_tuple': {
+                'reference_position': 0.0,
+                'reference_rotation': 0.0,
+                'reference_velocity': 0.0,
+                'reference_angular': 0.0
+            },
+            'kinematic_ref': ref_qp,
+        }
+        
+        
+        #save the infor on the metrics
+        for k in state_info['reward_tuple']:
+            metrics[k] = state_info['reward_tuple'][k]
+        
+        state = State(data, obs, reward, done, metrics,state_info)
            
-        return state
+        return jax.lax.stop_gradient(state)
     
     
     
     def step(self, state: State, action: jp.ndarray) -> State:
+        
+        #this doesnt increment it might increment with the algorithms?
+        index_new =jp.array(state.info['steps']%self.cycle_len, int)
+        
+        #jax.debug.print("new idx: {}",index_new)
+        
         initial_idx = state.metrics['step_index']
         #we want to check the next idx
         current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32) + 1
-        jax.debug.print("current_step_idx: {}",current_step_inx)
+        #jax.debug.print("current_step_idx: {}",current_step_inx)
         #get the reference state
-        current_state_ref = self.set_ref_state_pipeline(current_step_inx)
+        current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
         
-        #current qpos and qvel for the torque    
-        qpos = state.pipeline_state.q
-        qvel = state.pipeline_state.qd
-        
+        #updates in the info
+        state.info['kinematic_ref'] = current_state_ref.qpos
+         
         #perform forward kinematics to do the same movement that is on the reference trajectory
         #this is just for demostration that the trajectory data is working properly
         data = self.pipeline_init(current_state_ref.qpos, current_state_ref.qvel)
-        
-        
-        obs = self._get_obs(data, current_step_inx)
-        
-        reward = self.compute_rewards_diffmimic(data,current_state_ref)
         
         #here I will do the fall
         #check on the z axis
         fall = jp.where(data.qpos[2] < 0.2, jp.float32(1), jp.float32(0))
         fall = jp.where(data.qpos[2] > 1.7, jp.float32(1), fall)
+        
+        
+        obs = self._get_obs(data, current_step_inx)
+        
+        reward, reward_tuple = self.compute_rewards_diffmimic(data,current_state_ref)
+        
+        #state mangement
+        state.info['reward_tuple'] = reward_tuple
+        
+        for k in state.info['reward_tuple'].keys():
+            state.metrics[k] = state.info['reward_tuple'][k]
+        
         
         global_pos_state = data.x.pos
         global_pos_ref = current_state_ref.x.pos
@@ -207,21 +245,49 @@ class HumanoidTemplate(PipelineEnv):
         
         #now for the reference trajectory
         global_pos_ref = current_state_ref.x.pos
+        #jax.debug.print("global pos ref: {}",global_pos_ref)
+        
         global_rot_ref = quaternion_to_rotation_6d(current_state_ref.x.rot)
               
-        global_vel_ref = current_state_ref.xd.vel        
+        global_vel_ref = current_state_ref.xd.vel
+        #jax.debug.print("global ref vel: {}",global_pos_ref)
+                
         global_ang_ref = current_state_ref.xd.ang
+        #jax.debug.print("global ref ang: {}",global_pos_ref)
          
         # jax.debug.print("rot weight: {}",self.rot_weight)
         # jax.debug.print("vel weight: {}",self.vel_weight)
         # jax.debug.print("ang weight: {}",self.ang_weight)
         # jax.debug.print("reward scaling: {}",self.reward_scaling)
         
-        return -1 * (mse_pos(global_pos_state, global_pos_ref) +
-            self.rot_weight * mse_rot(global_rot_state, global_rot_ref) +
-            self.vel_weight * mse_vel(global_vel_state, global_vel_ref) +
-            self.ang_weight * mse_ang(global_ang_state, global_ang_ref)
-            ) * self.reward_scaling
+        
+        reward_tuple = {
+            'reference_position': (
+                mse_pos(global_pos_state, global_pos_ref)
+            
+            ),
+            'reference_rotation': (
+                mse_rot(global_rot_state, global_rot_ref)*self.rot_weight 
+            ),
+            'reference_velocity': (
+                mse_vel(global_vel_state, global_vel_ref) *self.vel_weight
+            ),
+            'reference_angular': (
+                mse_ang(global_ang_state, global_ang_ref)*  self.ang_weight
+            )   
+        }
+        
+        reward = -1*sum(reward_tuple.values()) * self.reward_scaling
+        
+        
+        
+    
+        return reward, reward_tuple
+        # return -1 * (mse_pos(global_pos_state, global_pos_ref) +
+        #     self.rot_weight * mse_rot(global_rot_state, global_rot_ref) +
+        #     self.vel_weight * mse_vel(global_vel_state, global_vel_ref) +
+        #     self.ang_weight * mse_ang(global_ang_state, global_ang_ref)
+        #     ) * self.reward_scaling
             
     
     
@@ -231,17 +297,124 @@ class HumanoidTemplate(PipelineEnv):
     
      
     
-    #standard obs this will changed on other derived
+     #standard obs this will changed on other derived
     #classes from this
-    def _get_obs(self, data: mjx.Data, action: jp.ndarray)-> jp.ndarray:
+    def _get_obs(self, data: base.State, step_idx: jp.ndarray)-> jp.ndarray:
           
-          #in theory it is mutiable if we do concatenate [] instead of
-          #() since, one is a list and the other a tuple
-          return jp.concatenate([data.qpos,data.qvel])
-   
-
+        current_step_inx =  jp.asarray(step_idx, dtype=jp.int32)
+        
+        
+        relative_pos , local_rotations,local_vel,local_ang = self.convert_local(data)
+        #relative_pos , local_rotations,local_vel,local_ang = self.convertLocaDiff(data)
+        
+        relative_pos = relative_pos[1:]
+        #q_relative_pos,q_local_rotations, q_local_vel, q_local_ang = self.convertLocaDiff(data)
+        
+        #convert quat to 6d root
+        rot_6D= quaternion_to_rotation_6d(local_rotations)
+        
+        
+        # jax.debug.print("pos mine{}",relative_pos)
+        # jax.debug.print("rot mine {}", local_rotations)
+        # jax.debug.print("vel mine{}", local_vel)
+        # jax.debug.print("ang mine{}", local_ang)
+        
+        # jax.debug.print("pos q{}",q_relative_pos)
+        # jax.debug.print("rot q {}", q_local_rotations)
+        # jax.debug.print("vel q{}", q_local_vel)
+        # jax.debug.print("ang q{}", q_local_ang)
+        #phi
+        phi = (current_step_inx % self.cycle_len) / self.cycle_len
+        
+        phi = jp.asarray(phi)
+        
+        
+        #jax.debug.print("phi{}", phi)
+        return jp.concatenate([relative_pos.ravel(),rot_6D.ravel(),
+                               local_vel.ravel(),local_ang.ravel(),phi[None]])
 
 
     
+    
+    def convert_local(self,data: base.State):
+        
+        root_pos = data.x.pos[0]
+        root_quat_inv =  math.quat_inv(data.x.rot[0])
+        
+        #inverted_root= math.quat_mul(root_quat_inv,data.x.rot[0])
+        
+        #apply root-relative transformation
+        def transform_to_root_local(pos, rot,vel, ang):
+            local_pos = pos - root_pos
+            local_rot = math.quat_mul(root_quat_inv, rot)
+            local_vel = math.rotate(vel,math.quat_inv(data.x.rot[0]))
+            local_ang = math.rotate(ang,math.quat_inv(data.x.rot[0]))
+            
+            return local_pos, local_rot, local_vel,local_ang
+        #Applying the transformation to all positions and orientations
+        #this is relative to the root
+        local_positions, local_rotations,local_vel,local_ang = jax.vmap(transform_to_root_local)(data.x.pos, data.x.rot,data.xd.vel,data.xd.ang)
+        #get rid of the zero  root pos
+        #relative_pos = local_positions[1:]
+        
+        return local_positions,local_rotations,local_vel,local_ang
+
+    
+    
+    def convertLocaDiff(self, data:base.State):
+        pos, rot, vel, ang = data.x.pos, data.x.rot, data.xd.vel, data.xd.ang
+
+        root_pos = pos[0] 
+
+        relative_pos = pos - root_pos
+        
+        #re-arrange all elements of the root quaterion as as xyzw
+        rot_xyzw_raw = rot[:, [1, 2, 3, 0]]
+        
+        #normalize quaternion to make it unit magnitude
+        rot_xyzw = diff_quat.quat_normalize(rot_xyzw_raw)
+        
+        root_rot_xyzw = diff_quat.quat_normalize(rot_xyzw[0])  
+        
+        #root_inverse = quat_inverse(root_rot_xyzw)
+        normalized_rot_xyzw = diff_quat.quat_mul_norm(diff_quat.quat_inverse(root_rot_xyzw), rot_xyzw)
+        normalized_pos = diff_quat.quat_rotate(diff_quat.quat_inverse(root_rot_xyzw), relative_pos)
+        normalized_vel = diff_quat.quat_rotate(diff_quat.quat_inverse(root_rot_xyzw), vel)
+        normalized_ang = diff_quat.quat_rotate(diff_quat.quat_inverse(root_rot_xyzw), ang)
+
+        normalized_rot = normalized_rot_xyzw[:, [3, 0, 1, 2]]
+        
+        return normalized_pos, normalized_rot, normalized_vel,normalized_ang
+    
+    
+    
+    
+    
+    
+    
+    def _com(self, pipeline_state: base.State) -> jax.Array:
+        inertia = self.sys.link.inertia
+        
+        mass_sum = jp.sum(inertia.mass)
+        x_i = pipeline_state.x.vmap().do(inertia.transform)
+        com = (
+            jp.sum(jax.vmap(jp.multiply)(inertia.mass, x_i.pos), axis=0) / mass_sum
+        )
+        return com, inertia, mass_sum, x_i  # pytype: disable=bad-return-type  # jax-ndarray
+
+
+    def mjx_to_brax(self, data):
+        """ 
+        Apply the brax wrapper on the core MJX data structure.
+        """
+        q, qd = data.qpos, data.qvel
+        x = Transform(pos=data.xpos[1:], rot=data.xquat[1:])
+        cvel = Motion(vel=data.cvel[1:, 3:], ang=data.cvel[1:, :3])
+        offset = data.xpos[1:, :] - data.subtree_com[self.sys.body_rootid[1:]]
+        offset = Transform.create(pos=offset)
+        xd = offset.vmap().do(cvel)
+        data = _reformat_contact(self.sys, data)
+        return data.replace(q=q, qd=qd, x=x, xd=xd)
+
     
     
