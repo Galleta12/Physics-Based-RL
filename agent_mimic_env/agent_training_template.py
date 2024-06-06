@@ -58,42 +58,16 @@ class HumanoidTrainTemplate(HumanoidEvalTemplate):
         self.err_threshold = args.threshold
         
         
-        
-    # def _demo_replay(self, state,ref_data_pos,current_idx)-> State:
-    #     global_pos_state = state.x.pos
-    #     #jax.debug.print("pos state: {}",global_pos_state)
-    #     #jax.debug.print("pos ref: {}",ref_data_pos)
-    #     error = loss_l2_pos(global_pos_state, ref_data_pos)
-    #     #jax.debug.print("error demoreplay: {}",error)
-        
-    #     replay = jp.where(error > self.err_threshold, jp.float32(1), jp.float32(0))
-    #     #jax.debug.print("replay: {}",replay)
-    #     #replace the ref_state data
-    #       # Define the true and false branch functions for lax.cond
-    #     def true_fun(_):
-    #         # Update state to reference state and maintain step index
-    #         return self.set_ref_state_pipeline(current_idx)
-    #         #return self.set_ref_step(current_idx,state)
-            
-
-    #     def false_fun(_):
-    #         # Return the original state with updated metrics
-    #         return state
-    #     # Use lax.cond to conditionally switch between states
-    #     new_data = lax.cond(replay == 1, true_fun, false_fun, None)
-        
-    #     return new_data,replay
-    
-    
+          
     def _demoreplay(self,data,ref_data):
         global_pos_state = data.x.pos
         ref_data_pos = ref_data.x.pos
         
         error = loss_l2_pos(global_pos_state, ref_data_pos)
-        #jax.debug.print("error demo replay: {}",error)
+        jax.debug.print("error demo replay: {}",error)
         to_reference = jp.where(error > self.err_threshold, 1.0, 0.0)
         to_reference = jp.array(to_reference, dtype=int) # keeps output types same as input. 
-        #jax.debug.print("to converted reference: {}",to_reference)
+        jax.debug.print("to converted reference: {}",to_reference)
         #convert the data to mjxbrax
         ref_data = self._get_new_ref(ref_data,data)
         #get new data
@@ -115,19 +89,19 @@ class HumanoidTrainTemplate(HumanoidEvalTemplate):
         data = state.pipeline_state
         
         #perform the demoreplay
-        idx = state.metrics['step_index']
-        idx_alg = jp.array(state.info['steps'], int)
-        current_step_inx =  jp.asarray(idx, dtype=jp.int32)
+         
+        index_new =jp.array(state.info['steps']%self.cycle_len, int)
         
-        #get the coordinates of the current step 
+        #jax.debug.print("new idx: {}",index_new)
+        current_step_inx = jp.array(state.info['index_step'],int)
+        #updated in the info
+        state.info['index_step'] =  state.info['index_step']
+        #jax.debug.print("index step: {}",state.info['index_step'])
+        
+        #get the coordinates of the reference state
         #get qpos and q vel
         ref_data = self.set_ref_state_pipeline(current_step_inx,data)
-        #ref_qpos,ref_qvel=self.get_ref_qdata(current_step_inx)
-     
-        # ref_data = data.replace(qpos=ref_qpos, qvel=ref_qvel)
-        # ref_data = mjx.forward(self.sys, ref_data)
-        # ref_x, ref_xd = ref_data.x, ref_data.xd
-
+        
         #perform the demoreplay
         new_ref_data,to_reference = self._demoreplay(data,ref_data)
         
@@ -136,7 +110,7 @@ class HumanoidTrainTemplate(HumanoidEvalTemplate):
                                   jp.array((1-to_reference)*x + to_reference*y, x.dtype), data, new_ref_data)
 
         
-        obs = self._get_obs(data,current_step_inx)
+        obs = self._get_obs(data,state.info)
         
         return state.replace(pipeline_state=data, obs=obs) 
     
@@ -144,25 +118,22 @@ class HumanoidTrainTemplate(HumanoidEvalTemplate):
     def step_custom(self, state: State, action: jp.ndarray) -> State:
         
         state = super(HumanoidTrainTemplate,self).step_custom(state,action)
-        #grab the data
         data = state.pipeline_state
         
         #perform the demoreplay
-        idx = state.metrics['step_index']
-        idx_alg = jp.array(state.info['steps'], int)
-        current_step_inx =  jp.asarray(idx, dtype=jp.int32)
+         
+        index_new =jp.array(state.info['steps']%self.cycle_len, int)
         
+        #jax.debug.print("new idx: {}",index_new)
+        current_step_inx = jp.array(state.info['index_step'],int)
+        #updated in the info
+        state.info['index_step'] =  state.info['index_step']
+        #jax.debug.print("index step: {}",state.info['index_step'])
         
-        #get the coordinates of the current step 
+        #get the coordinates of the reference state
         #get qpos and q vel
-        
         ref_data = self.set_ref_state_pipeline(current_step_inx,data)
-        #ref_qpos,ref_qvel=self.get_ref_qdata(current_step_inx)
-     
-        # ref_data = data.replace(qpos=ref_qpos, qvel=ref_qvel)
-        # ref_data = mjx.forward(self.sys, ref_data)
-        # ref_x, ref_xd = ref_data.x, ref_data.xd
-
+        
         #perform the demoreplay
         new_ref_data,to_reference = self._demoreplay(data,ref_data)
         
@@ -171,7 +142,7 @@ class HumanoidTrainTemplate(HumanoidEvalTemplate):
                                   jp.array((1-to_reference)*x + to_reference*y, x.dtype), data, new_ref_data)
 
         
-        obs = self._get_obs(data,current_step_inx)
+        obs = self._get_obs(data,state.info)
         
         return state.replace(pipeline_state=data, obs=obs) 
     

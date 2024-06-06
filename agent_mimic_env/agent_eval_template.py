@@ -58,7 +58,10 @@ class HumanoidEvalTemplate(HumanoidTemplate):
             policy=jax.checkpoint_policies.dots_with_no_batch_dims_saveable)
     
 
-    #
+    
+    
+    
+    
     def step(self, state: State, action: jp.ndarray) -> State:
         
         #perform the action of the policy
@@ -81,30 +84,25 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         data = self.pipeline_step(state.pipeline_state,torque)
         #data = self.pipeline_init(current_state_ref.qpos, current_state_ref.qvel)
         
+        #get the observations
+        obs = self._get_obs(data, state.info)
         
         
         index_new =jp.array(state.info['steps']%self.cycle_len, int)
         
         #jax.debug.print("new idx: {}",index_new)
         
-        
-        
-        initial_idx =  state.metrics['step_index']
-        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32) + 1
+        current_step_inx = jp.array(state.info['index_step'] + 1,int)
+        #updated in the info
+        state.info['index_step'] =  state.info['index_step'] + 1.0
         
         current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
 
-        #updates in the info
-        state.info['kinematic_ref'] = current_state_ref.qpos
         
-        
-       
         fall=0.0
         fall = jp.where(data.qpos[2] < 0.2, 1.0, fall)
         fall = jp.where(data.qpos[2] > 1.7, 1.0, fall)
         
-        #get the observations
-        obs = self._get_obs(data, current_step_inx)
         
         reward, reward_tuple = self.compute_rewards_diffmimic(data,current_state_ref)
         
@@ -120,16 +118,7 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         global_pos_ref = current_state_ref.x.pos
         pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
         
-        # state.info['step_index'] = current_step_inx
-        # state.info['pose_error'] = pose_error
-        # state.info['fall'] = fall
-        
-        
-        state.metrics.update(
-            step_index=current_step_inx,
-            pose_error=pose_error,
-            fall=fall,
-        )
+        state.metrics['pose_error'] = pose_error
         
         return state.replace(
             pipeline_state= data, obs=obs, reward=reward, done=fall
@@ -141,16 +130,17 @@ class HumanoidEvalTemplate(HumanoidTemplate):
     #class for testing step_custom where we just check the pd controller
     def step_custom(self, state: State, action: jp.ndarray) -> State:
         
+          
         index_new =jp.array(state.info['steps']%self.cycle_len, int)
+        
         #jax.debug.print("new idx: {}",index_new)
         
-        initial_idx = state.metrics['step_index']
-        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32) + 1
+        current_step_inx = jp.array(state.info['index_step'] + 1,int)
+        #updated in the info
+        state.info['index_step'] =  state.info['index_step'] + 1.0
         
         current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
 
-        #updates in the info
-        state.info['kinematic_ref'] = current_state_ref.qpos
         #current qpos and qvel for the torque    
         qpos = state.pipeline_state.q
         qvel = state.pipeline_state.qd
@@ -165,14 +155,13 @@ class HumanoidEvalTemplate(HumanoidTemplate):
                                  self.kp_gains,self.kd_gains,timeEnv,dt) 
         data = self.pipeline_step(state.pipeline_state,torque)
         
+        #get the observations
+        obs = self._get_obs(data, state.info)
+        
         
         fall=0.0
         fall = jp.where(data.qpos[2] < 0.2, 1.0, fall)
         fall = jp.where(data.qpos[2] > 1.7, 1.0, fall)
-        
-        
-        #get the observations
-        obs = self._get_obs(data, current_step_inx)
         
         reward, reward_tuple = self.compute_rewards_diffmimic(data,current_state_ref)
         
@@ -188,17 +177,7 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         global_pos_ref = current_state_ref.x.pos
         pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
         
-        # state.info['step_index'] = current_step_inx
-        # state.info['pose_error'] = pose_error
-        # state.info['fall'] = fall
-        
-        
-        state.metrics.update(
-            step_index=current_step_inx,
-            pose_error=pose_error,
-            fall=fall,
-        )
-        
+        state.metrics['pose_error'] = pose_error
         return state.replace(
             pipeline_state= data, obs=obs, reward=reward, done=fall
         )

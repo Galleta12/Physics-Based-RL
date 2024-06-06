@@ -2,7 +2,7 @@
     <!-- <option gravity="0 0 0"/> -->
     <compiler angle="radian" inertiafromgeom="true"/>
     
-    <option>
+    <option  solver="Newton">
         <flag eulerdamp="disable"/>
     </option>
      <!-- <option timestep="0.005" iterations="1" ls_iterations="4" solver="Newton">

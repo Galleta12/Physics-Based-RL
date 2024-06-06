@@ -58,6 +58,10 @@ class HumanoidTemplate(PipelineEnv):
         path = epath.Path(model_path).as_posix()
         mj_model = mujoco.MjModel.from_xml_path(path)
         
+        mj_model.opt.solver = mujoco.mjtSolver.mjSOL_NEWTON
+        mj_model.opt.iterations = 1
+        mj_model.opt.ls_iterations = 6
+        
         sys = mjcf.load_model(mj_model)
         
         
@@ -74,20 +78,14 @@ class HumanoidTemplate(PipelineEnv):
         #and the sys for the reference
         self.sys_reference = deepcopy(self.sys)
         #data for the reference
-        self.reference_trajectory_qpos = jp.asarray(reference_data.data_pos)
-        self.reference_trajectory_qvel = jp.asarray(reference_data.data_vel)
-        self.reference_x_pos = reference_data.data_xpos
-        self.reference_x_rot = reference_data.data_xrot
-        
-        #a dictionary with the duration of the data
-        self.duration_trajectory = reference_data.total_time
-        self.dict_duration = reference_data.duration_dict
+        self.reference_trajectory_qpos = jp.array(reference_data.data_pos)
+        self.reference_trajectory_qvel = jp.array(reference_data.data_vel)
         
         #the gains for the pd controller
         self.kp_gains,self.kd_gains = generate_kp_kd_gains()
         
         #this it is the lenght, of the trajectory
-        self.rollout_lenght = self.reference_trajectory_qpos.shape[0]
+        self.rollout_lenght = jp.array(self.reference_trajectory_qpos.shape[0])
         
         self.rot_weight =  args.rot_weight
         self.vel_weight =  args.vel_weight
@@ -95,14 +93,18 @@ class HumanoidTemplate(PipelineEnv):
         self.reward_scaling= args.reward_scaling
         
         #for now it will be the same size
-        self.cycle_len = args.cycle_len if args.cycle_len !=0 else self.rollout_lenght  
+        self.cycle_len = jp.array(args.cycle_len) if args.cycle_len !=0 else self.rollout_lenght  
 
         
         #ind for the end-effect reward of deepmimic
         #this is located on the geom_xpos
         #right_wrist,left_writst,right_ankle,left_ankle
         #the geom_xpos has a shape of 16x3
+        # Can decrease jit time and training wall-clock time significantly.
         self.dict_ee = jp.array([6,9,12,15])
+        
+        self.pipeline_step = jax.checkpoint(self.pipeline_step, 
+        policy=jax.checkpoint_policies.dots_with_no_batch_dims_saveable)
         
         
         
@@ -112,7 +114,11 @@ class HumanoidTemplate(PipelineEnv):
     
     #get a reference state from the referece trajectory
     #this is used on the reset only on the reset
-    def get_reference_state(self,step_index):
+    def get_reference_state(self,idx):
+        
+        #step_index=jp.array(idx,int)
+        step_index=idx
+        
         ref_qp = self.reference_trajectory_qpos[step_index]
         ref_qv = self.reference_trajectory_qvel[step_index]
         #now I will return a state depending on the index and the reference trajectory
@@ -135,24 +141,22 @@ class HumanoidTemplate(PipelineEnv):
     
     
     #the standard reset for all the agents derived from this class
-    def reset(self, rng: jp.ndarray) -> State:
+    def reset(self, rng: jax.Array) -> State:
+        
+        
         
         #set this as zero
-        reward, done, zero = jp.zeros(3)
+        reward, done,zero = jp.zeros(3)
         #start at the initial state
         data = self.get_reference_state(0)       
         # qvel = jp.zeros(self.sys.nv)
         # qpos =  self.sys.qpos0
         # data = self.pipeline_init(qpos,qvel) 
         
-        metrics = {'step_index': 0, 'pose_error': zero, 'fall': zero}
-        obs = self._get_obs(data, 0)    
+        metrics = {'pose_error': 0.0}
         #jax.debug.print("obs: {}",obs.shape)
         #the obs should be size 193?
-        
-        ref_qp = self.reference_trajectory_qpos[0]
-        
-        
+                
         state_info = {
             'rng': rng,
             'steps': 0.0,
@@ -162,20 +166,19 @@ class HumanoidTemplate(PipelineEnv):
                 'reference_velocity': 0.0,
                 'reference_angular': 0.0
             },
-            'kinematic_ref': ref_qp
-            # 'step_index':0.0,
-            # 'pose_error':0.0,
-            # 'fall': 0.0
-            
+            'index_step': 0.0,
+        
         }
         
+        obs = self._get_obs(data, state_info)    
         #metrics = {}
         #save the infor on the metrics
         for k in state_info['reward_tuple']:
             metrics[k] = state_info['reward_tuple'][k]
         
+        
         state = State(data, obs, reward, done, metrics,state_info)
-           
+        
         return jax.lax.stop_gradient(state)
     
     
@@ -187,30 +190,32 @@ class HumanoidTemplate(PipelineEnv):
         
         #jax.debug.print("new idx: {}",index_new)
         
-        initial_idx = state.metrics['step_index']
-        #we want to check the next idx
-        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32) + 1
-        #jax.debug.print("current_step_idx: {}",current_step_inx)
+        current_step_inx = jp.array(state.info['index_step'] + 1,int)
+        #updated in the info
+        state.info['index_step'] =  state.info['index_step'] + 1.0
+        
+
         #get the reference state
         current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
         
-        #updates in the info
-        state.info['kinematic_ref'] = current_state_ref.qpos
          
         #perform forward kinematics to do the same movement that is on the reference trajectory
         #this is just for demostration that the trajectory data is working properly
         data = self.pipeline_init(current_state_ref.qpos, current_state_ref.qvel)
         
+        obs = self._get_obs(data, state.info)
+        
         #here I will do the fall
         #check on the z axis
+        fall=0.0
         fall = jp.where(data.qpos[2] < 0.2, 1.0, 0.0)
         fall = jp.where(data.qpos[2] > 1.7, 1.0, fall)
         
         
-        obs = self._get_obs(data, current_step_inx)
         
         reward, reward_tuple = self.compute_rewards_diffmimic(data,current_state_ref)
         
+            
         #state mangement
         state.info['reward_tuple'] = reward_tuple
         
@@ -222,14 +227,8 @@ class HumanoidTemplate(PipelineEnv):
         global_pos_ref = current_state_ref.x.pos
         pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
         
-        # state.info['step_index'] = current_step_inx
-        # state.info['pose_error'] = pose_error
-        # state.info['fall'] = fall
-        state.metrics.update(
-            step_index=current_step_inx,
-            pose_error=pose_error,
-            fall=fall,
-        )
+        state.metrics['pose_error'] = pose_error
+        
         
         return state.replace(
             pipeline_state= data, obs=obs, reward=reward, done=fall
@@ -292,13 +291,7 @@ class HumanoidTemplate(PipelineEnv):
         
     
         return reward, reward_tuple
-        # return -1 * (mse_pos(global_pos_state, global_pos_ref) +
-        #     self.rot_weight * mse_rot(global_rot_state, global_rot_ref) +
-        #     self.vel_weight * mse_vel(global_vel_state, global_vel_ref) +
-        #     self.ang_weight * mse_ang(global_ang_state, global_ang_ref)
-        #     ) * self.reward_scaling
             
-    
     
     def compute_rewards_deepmimic(self,data,current_state_ref):
         
@@ -308,10 +301,10 @@ class HumanoidTemplate(PipelineEnv):
     
      #standard obs this will changed on other derived
     #classes from this
-    def _get_obs(self, data: base.State, step_idx: jp.ndarray)-> jp.ndarray:
-          
-        current_step_inx =  jp.asarray(step_idx, dtype=jp.int32)
+    def _get_obs(self, data: base.State, state_info: Dict[str, Any]) -> jax.Array:
+
         
+        current_idx = jp.array(state_info['index_step'],int)
         
         relative_pos , local_rotations,local_vel,local_ang = self.convert_local(data)
         #relative_pos , local_rotations,local_vel,local_ang = self.convertLocaDiff(data)
@@ -321,28 +314,17 @@ class HumanoidTemplate(PipelineEnv):
         
         #convert quat to 6d root
         rot_6D= quaternion_to_rotation_6d(local_rotations)
-        
-        
-        # jax.debug.print("pos mine{}",relative_pos)
-        # jax.debug.print("rot mine {}", local_rotations)
-        # jax.debug.print("vel mine{}", local_vel)
-        # jax.debug.print("ang mine{}", local_ang)
-        
-        # jax.debug.print("pos q{}",q_relative_pos)
-        # jax.debug.print("rot q {}", q_local_rotations)
-        # jax.debug.print("vel q{}", q_local_vel)
-        # jax.debug.print("ang q{}", q_local_ang)
-        #phi
-        phi = (current_step_inx % self.cycle_len) / self.cycle_len
-        
-        phi = jp.asarray(phi)
-        
-        
-        #jax.debug.print("phi{}", phi)
+
+        phi = (current_idx % self.cycle_len) / self.cycle_len
+
+        phi = jp.array(phi)
+
         return jp.concatenate([relative_pos.ravel(),rot_6D.ravel(),
                                local_vel.ravel(),local_ang.ravel(),phi[None]])
-
-
+    
+    
+    
+    
     
     
     def convert_local(self,data: base.State):
@@ -369,36 +351,9 @@ class HumanoidTemplate(PipelineEnv):
         return local_positions,local_rotations,local_vel,local_ang
 
     
+     
     
-    def convertLocaDiff(self, data:base.State):
-        pos, rot, vel, ang = data.x.pos, data.x.rot, data.xd.vel, data.xd.ang
 
-        root_pos = pos[0] 
-
-        relative_pos = pos - root_pos
-        
-        #re-arrange all elements of the root quaterion as as xyzw
-        rot_xyzw_raw = rot[:, [1, 2, 3, 0]]
-        
-        #normalize quaternion to make it unit magnitude
-        rot_xyzw = diff_quat.quat_normalize(rot_xyzw_raw)
-        
-        root_rot_xyzw = diff_quat.quat_normalize(rot_xyzw[0])  
-        
-        #root_inverse = quat_inverse(root_rot_xyzw)
-        normalized_rot_xyzw = diff_quat.quat_mul_norm(diff_quat.quat_inverse(root_rot_xyzw), rot_xyzw)
-        normalized_pos = diff_quat.quat_rotate(diff_quat.quat_inverse(root_rot_xyzw), relative_pos)
-        normalized_vel = diff_quat.quat_rotate(diff_quat.quat_inverse(root_rot_xyzw), vel)
-        normalized_ang = diff_quat.quat_rotate(diff_quat.quat_inverse(root_rot_xyzw), ang)
-
-        normalized_rot = normalized_rot_xyzw[:, [3, 0, 1, 2]]
-        
-        return normalized_pos, normalized_rot, normalized_vel,normalized_ang
-    
-    
-    
-    
-    
     
     
     def _com(self, pipeline_state: base.State) -> jax.Array:
