@@ -51,12 +51,9 @@ from utils.util_data import generate_kp_kd_gains
 
 
 class HumanoidTrainTemplate(HumanoidEvalTemplate):
-    def __init__(self, reference_data: SimpleConverter, 
-                 model_path, 
-                 args, **kwargs):
-        super().__init__(reference_data, 
-                         model_path, 
-                         args, **kwargs)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        args = kwargs.pop('args')
         
         self.err_threshold = args.threshold
         

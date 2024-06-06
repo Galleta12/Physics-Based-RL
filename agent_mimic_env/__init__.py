@@ -1,6 +1,7 @@
 from .agent_template import HumanoidTemplate
 from .agent_eval_template import HumanoidEvalTemplate
 from .agent_training_template import HumanoidTrainTemplate
+from .agent_test_apg import HumanoidAPGTest
 from .pds_controllers_agents import *
 from brax import envs
 import sys
@@ -14,7 +15,7 @@ sys.path.append(parent_dir)
 from utils.SimpleConverter import SimpleConverter
 
 
-def register_mimic_env(args) -> Tuple[HumanoidTemplate,HumanoidEvalTemplate,HumanoidTrainTemplate]:
+def register_mimic_env(args) -> Tuple[HumanoidTemplate,HumanoidEvalTemplate,HumanoidTrainTemplate,HumanoidAPGTest]:
 #def register_mimic_env(args) -> HumanoidTemplate:
         
     trajectory = SimpleConverter(args.ref)
@@ -35,35 +36,51 @@ def register_mimic_env(args) -> Tuple[HumanoidTemplate,HumanoidEvalTemplate,Huma
     env_name = 'humanoidEnvTrain'
     env = generate_env_train(trajectory,model_path,env_name,args)
     
-     
-    return env_replay,env_eval,env
+    
+    envs.register_environment('humanoidApgTest',HumanoidAPGTest)
+    env_name_apg = 'humanoidApgTest'
+    env_apg = generate_env_apg_train(trajectory,model_path,env_name_apg,args)
+    
+    
+    
+    return env_replay,env_eval,env,env_apg
     #return env_replay
+
+
+def generate_env_apg_train(trajectory,model_path,env_name_apg,args):
+    
+    #model_path = 'anybotics_anymal_c/scene_mjx.xml'
+    
+    env_kwargs = dict(referece_data=trajectory,model_path=model_path,args=args) 
+    
+    env = envs.get_environment(env_name_apg,**env_kwargs)
+    return env
+    
 
 
 
 def generate_env_train(trajectory:SimpleConverter,model_path,env_name,args):
-    env = envs.get_environment(env_name=env_name,
-                           reference_data=trajectory,
-                           model_path=model_path,
-                           args=args)
+    
+    env_kwargs = dict(referece_data=trajectory,model_path=model_path,args=args) 
+    
+    env = envs.get_environment(env_name,**env_kwargs)
     return env
     
 
 
 
 def generate_env_replay(trajectory:SimpleConverter, model_path,env_replay_name,args):
-    env_replay = envs.get_environment(env_name=env_replay_name,
-                           reference_data=trajectory,
-                           model_path=model_path,
-                           args=args)
+    
+    
+    env_kwargs = dict(referece_data=trajectory,model_path=model_path,args=args) 
+    env_replay = envs.get_environment(env_replay_name,**env_kwargs)
     return env_replay
     
 
 def generate_env_eval(trajectory:SimpleConverter,model_path,env_eval_name,args):
-    env_eval = envs.get_environment(env_name=env_eval_name,
-                           reference_data=trajectory,
-                           model_path=model_path,
-                           args=args)
+    env_kwargs = dict(referece_data=trajectory,model_path=model_path,args=args) 
+    
+    env_eval = envs.get_environment(env_eval_name,**env_kwargs)
     return env_eval
     
     

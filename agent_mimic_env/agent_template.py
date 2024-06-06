@@ -47,11 +47,13 @@ import some_math.quaternion_diff as diff_quat
 class HumanoidTemplate(PipelineEnv):
     def __init__(
       self,
-      reference_data: SimpleConverter,
-      model_path,
-      args,
       **kwargs,
     ):
+        
+        reference_data = kwargs.pop('referece_data')
+        model_path = kwargs.pop('model_path')
+        args = kwargs.pop('args')
+        
         
         path = epath.Path(model_path).as_posix()
         mj_model = mujoco.MjModel.from_xml_path(path)
@@ -160,10 +162,14 @@ class HumanoidTemplate(PipelineEnv):
                 'reference_velocity': 0.0,
                 'reference_angular': 0.0
             },
-            'kinematic_ref': ref_qp,
+            'kinematic_ref': ref_qp
+            # 'step_index':0.0,
+            # 'pose_error':0.0,
+            # 'fall': 0.0
+            
         }
         
-        
+        #metrics = {}
         #save the infor on the metrics
         for k in state_info['reward_tuple']:
             metrics[k] = state_info['reward_tuple'][k]
@@ -197,8 +203,8 @@ class HumanoidTemplate(PipelineEnv):
         
         #here I will do the fall
         #check on the z axis
-        fall = jp.where(data.qpos[2] < 0.2, jp.float32(1), jp.float32(0))
-        fall = jp.where(data.qpos[2] > 1.7, jp.float32(1), fall)
+        fall = jp.where(data.qpos[2] < 0.2, 1.0, 0.0)
+        fall = jp.where(data.qpos[2] > 1.7, 1.0, fall)
         
         
         obs = self._get_obs(data, current_step_inx)
@@ -216,6 +222,9 @@ class HumanoidTemplate(PipelineEnv):
         global_pos_ref = current_state_ref.x.pos
         pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
         
+        # state.info['step_index'] = current_step_inx
+        # state.info['pose_error'] = pose_error
+        # state.info['fall'] = fall
         state.metrics.update(
             step_index=current_step_inx,
             pose_error=pose_error,
@@ -223,7 +232,7 @@ class HumanoidTemplate(PipelineEnv):
         )
         
         return state.replace(
-            pipeline_state= data, obs=obs, reward=reward, done=state.metrics['fall']
+            pipeline_state= data, obs=obs, reward=reward, done=fall
         )
         
         

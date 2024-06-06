@@ -1,6 +1,12 @@
 <mujoco model="humanoid">
     <!-- <option gravity="0 0 0"/> -->
     <compiler angle="radian" inertiafromgeom="true"/>
+    
+    <option iterations="1" ls_iterations="4" solver="Newton" cone="pyramidal" impratio="100">
+        <flag eulerdamp="disable"/>
+    </option>
+    
+    
     <default>
         <joint limited="true" armature="1" damping="1"/>
         <geom conaffinity="1" condim="3" contype="1" margin="0.001" rgba="0.7 0.5 .3 1"/>

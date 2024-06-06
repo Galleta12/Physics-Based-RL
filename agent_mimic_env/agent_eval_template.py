@@ -51,14 +51,8 @@ import some_math.quaternion_diff as diff_quat
 
 
 class HumanoidEvalTemplate(HumanoidTemplate):
-    def __init__(self, reference_data: SimpleConverter, 
-                 model_path, 
-                 args, 
-                 **kwargs):
-        super().__init__(reference_data, 
-                         model_path, 
-                         args, 
-                         **kwargs)
+    def __init__(self,**kwargs):
+        super().__init__(**kwargs)
         
         self.pipeline_step = jax.checkpoint(self.pipeline_step, 
             policy=jax.checkpoint_policies.dots_with_no_batch_dims_saveable)
@@ -91,11 +85,11 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         
         index_new =jp.array(state.info['steps']%self.cycle_len, int)
         
-        jax.debug.print("new idx: {}",index_new)
+        #jax.debug.print("new idx: {}",index_new)
         
         
         
-        initial_idx = state.metrics['step_index']
+        initial_idx =  state.metrics['step_index']
         current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32) + 1
         
         current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
@@ -105,9 +99,9 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         
         
        
-        
-        fall = jp.where(data.qpos[2] < 0.2, jp.float32(1), jp.float32(0))
-        fall = jp.where(data.qpos[2] > 1.7, jp.float32(1), fall)
+        fall=0.0
+        fall = jp.where(data.qpos[2] < 0.2, 1.0, fall)
+        fall = jp.where(data.qpos[2] > 1.7, 1.0, fall)
         
         #get the observations
         obs = self._get_obs(data, current_step_inx)
@@ -126,6 +120,11 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         global_pos_ref = current_state_ref.x.pos
         pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
         
+        # state.info['step_index'] = current_step_inx
+        # state.info['pose_error'] = pose_error
+        # state.info['fall'] = fall
+        
+        
         state.metrics.update(
             step_index=current_step_inx,
             pose_error=pose_error,
@@ -133,7 +132,7 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         )
         
         return state.replace(
-            pipeline_state= data, obs=obs, reward=reward, done=state.metrics['fall']
+            pipeline_state= data, obs=obs, reward=reward, done=fall
         )
         
     
@@ -167,8 +166,9 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         data = self.pipeline_step(state.pipeline_state,torque)
         
         
-        fall = jp.where(data.qpos[2] < 0.2, jp.float32(1), jp.float32(0))
-        fall = jp.where(data.qpos[2] > 1.7, jp.float32(1), fall)
+        fall=0.0
+        fall = jp.where(data.qpos[2] < 0.2, 1.0, fall)
+        fall = jp.where(data.qpos[2] > 1.7, 1.0, fall)
         
         
         #get the observations
@@ -188,6 +188,11 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         global_pos_ref = current_state_ref.x.pos
         pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
         
+        # state.info['step_index'] = current_step_inx
+        # state.info['pose_error'] = pose_error
+        # state.info['fall'] = fall
+        
+        
         state.metrics.update(
             step_index=current_step_inx,
             pose_error=pose_error,
@@ -195,7 +200,7 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         )
         
         return state.replace(
-            pipeline_state= data, obs=obs, reward=reward, done=state.metrics['fall']
+            pipeline_state= data, obs=obs, reward=reward, done=fall
         )
         
         
