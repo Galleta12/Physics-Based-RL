@@ -90,7 +90,7 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         
         
         initial_idx =  state.metrics['step_index']
-        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32) + 1
+        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int64) + 1
         
         current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
 
@@ -145,7 +145,7 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         #jax.debug.print("new idx: {}",index_new)
         
         initial_idx = state.metrics['step_index']
-        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32) + 1
+        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int64) + 1
         
         current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
 

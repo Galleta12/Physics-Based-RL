@@ -117,7 +117,7 @@ class HumanoidTrainTemplate(HumanoidEvalTemplate):
         #perform the demoreplay
         idx = state.metrics['step_index']
         idx_alg = jp.array(state.info['steps'], int)
-        current_step_inx =  jp.asarray(idx, dtype=jp.int32)
+        current_step_inx =  jp.asarray(idx, dtype=jp.int64)
         
         #get the coordinates of the current step 
         #get qpos and q vel
@@ -150,7 +150,7 @@ class HumanoidTrainTemplate(HumanoidEvalTemplate):
         #perform the demoreplay
         idx = state.metrics['step_index']
         idx_alg = jp.array(state.info['steps'], int)
-        current_step_inx =  jp.asarray(idx, dtype=jp.int32)
+        current_step_inx =  jp.asarray(idx, dtype=jp.int64)
         
         
         #get the coordinates of the current step 

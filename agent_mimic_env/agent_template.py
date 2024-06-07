@@ -189,7 +189,7 @@ class HumanoidTemplate(PipelineEnv):
         
         initial_idx = state.metrics['step_index']
         #we want to check the next idx
-        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int32) + 1
+        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int64) + 1
         #jax.debug.print("current_step_idx: {}",current_step_inx)
         #get the reference state
         current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
@@ -310,7 +310,7 @@ class HumanoidTemplate(PipelineEnv):
     #classes from this
     def _get_obs(self, data: base.State, step_idx: jp.ndarray)-> jp.ndarray:
           
-        current_step_inx =  jp.asarray(step_idx, dtype=jp.int32)
+        current_step_inx =  jp.asarray(step_idx, dtype=jp.int64)
         
         
         relative_pos , local_rotations,local_vel,local_ang = self.convert_local(data)
