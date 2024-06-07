@@ -2,6 +2,7 @@ from .agent_template import HumanoidTemplate
 from .agent_eval_template import HumanoidEvalTemplate
 from .agent_training_template import HumanoidTrainTemplate
 from .agent_test_apg import HumanoidAPGTest
+from .agent_ppo_train import  HumanoidPPOENV
 from .pds_controllers_agents import *
 from brax import envs
 import sys
@@ -13,6 +14,28 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
 from utils.SimpleConverter import SimpleConverter
+
+
+
+
+
+
+
+def register_ppo_env(args) -> HumanoidPPOENV:
+        
+    trajectory = SimpleConverter(args.ref)
+    trajectory.load_mocap()
+    model_path = 'models/final_humanoid.xml'
+    
+    envs.register_environment('humanoidPPOEnv',HumanoidPPOENV)
+    env_name_ppo = 'humanoidPPOEnv'
+    env_ppo = generate_env_ppo(trajectory,model_path,env_name_ppo,args)
+
+    return env_ppo
+
+
+
+
 
 
 def register_mimic_env(args) -> Tuple[HumanoidTemplate,HumanoidEvalTemplate,HumanoidTrainTemplate,HumanoidAPGTest]:
@@ -46,6 +69,15 @@ def register_mimic_env(args) -> Tuple[HumanoidTemplate,HumanoidEvalTemplate,Huma
     return env_replay,env_eval,env,env_apg
     #return env_replay
 
+
+
+def generate_env_ppo(trajectory,model_path,env_name_ppo,args):
+    
+    env_kwargs = dict(referece_data=trajectory,model_path=model_path,args=args) 
+    
+    env_ppo = envs.get_environment(env_name_ppo,**env_kwargs)
+    return env_ppo
+    
 
 def generate_env_apg_train(trajectory,model_path,env_name_apg,args):
     

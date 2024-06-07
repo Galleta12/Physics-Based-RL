@@ -58,11 +58,11 @@ class HumanoidTemplate(PipelineEnv):
         path = epath.Path(model_path).as_posix()
         mj_model = mujoco.MjModel.from_xml_path(path)
         
-        mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
-        mj_model.opt.iterations = 6
-        mj_model.opt.ls_iterations = 6
+        # mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
+        # mj_model.opt.iterations = 6
+        # mj_model.opt.ls_iterations = 6
             
-        
+        #physics_steps_per_control_step = 10
         
         sys = mjcf.load_model(mj_model)
         
@@ -75,7 +75,6 @@ class HumanoidTemplate(PipelineEnv):
         n_frames = kwargs.pop('n_frames', int(self._dt / 0.002))
         
         super().__init__(sys, backend='mjx', n_frames=n_frames)
-        
         #this is to keep separate the sys of the agent
         #and the sys for the reference
         self.sys_reference = deepcopy(self.sys)
@@ -103,6 +102,11 @@ class HumanoidTemplate(PipelineEnv):
         #for now it will be the same size
         self.cycle_len = args.cycle_len if args.cycle_len !=0 else self.rollout_lenght  
 
+        
+        #initial position
+        #the initial position
+        self._inital_pos = self.reference_trajectory_qpos[0]
+        
         
         #ind for the end-effect reward of deepmimic
         #this is located on the geom_xpos
@@ -306,10 +310,7 @@ class HumanoidTemplate(PipelineEnv):
         #     ) * self.reward_scaling
             
     
-    
-    def compute_rewards_deepmimic(self,data,current_state_ref):
-        
-        pass
+
     
      
     
@@ -389,7 +390,7 @@ class HumanoidTemplate(PipelineEnv):
         
         #normalize quaternion to make it unit magnitude
         rot_xyzw = diff_quat.quat_normalize(rot_xyzw_raw)
-        
+        #normalize root rot
         root_rot_xyzw = diff_quat.quat_normalize(rot_xyzw[0])  
         
         #root_inverse = quat_inverse(root_rot_xyzw)
@@ -400,7 +401,9 @@ class HumanoidTemplate(PipelineEnv):
 
         normalized_rot = normalized_rot_xyzw[:, [3, 0, 1, 2]]
         
-        return normalized_pos, normalized_rot, normalized_vel,normalized_ang
+        #we just pass the relative pos
+        
+        return relative_pos, normalized_rot, normalized_vel,normalized_ang
     
     
     
