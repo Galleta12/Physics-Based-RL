@@ -96,7 +96,7 @@ class HumanoidTrainTemplate(HumanoidEvalTemplate):
         current_step_inx = jp.array(state.info['index_step'],int)
         #updated in the info
         state.info['index_step'] =  state.info['index_step']
-        #jax.debug.print("index step: {}",state.info['index_step'])
+        jax.debug.print("index step: {}",state.info['index_step'])
         
         #get the coordinates of the reference state
         #get qpos and q vel
