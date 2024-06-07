@@ -183,6 +183,7 @@ class HumanoidTemplate(PipelineEnv):
         state = State(data, obs, reward, done, metrics,state_info)
            
         return jax.lax.stop_gradient(state)
+        #return state
     
     
     
