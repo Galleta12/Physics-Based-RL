@@ -58,6 +58,12 @@ class HumanoidTemplate(PipelineEnv):
         path = epath.Path(model_path).as_posix()
         mj_model = mujoco.MjModel.from_xml_path(path)
         
+        mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
+        mj_model.opt.iterations = 6
+        mj_model.opt.ls_iterations = 6
+            
+        
+        
         sys = mjcf.load_model(mj_model)
         
         
