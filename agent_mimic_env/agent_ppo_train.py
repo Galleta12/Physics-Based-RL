@@ -143,7 +143,7 @@ class HumanoidPPOENV(HumanoidTemplate):
         current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
 
         fall=0.0
-        fall = jp.where(data.qpos[2] < 0.3, 1.0, fall)
+        fall = jp.where(data.qpos[2] < 0.5, 1.0, fall)
         fall = jp.where(data.qpos[2] > 1.7, 1.0, fall)
         
         #get the observations
