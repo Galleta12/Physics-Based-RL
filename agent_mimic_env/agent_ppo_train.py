@@ -341,8 +341,8 @@ class HumanoidPPOENV(HumanoidTemplate):
         
         # quat_reward = jp.exp(-self.w_pose *(norm**2))
         
-        local_rot = local_rot.at[0].set(local_rot.x.rot[0])
-        current_state_ref = current_state_ref.at[0].set(current_state_ref.x.rot[0])
+        local_rot = local_rot.at[0].set(local_rot[0])
+        current_state_ref = current_state_ref.at[0].set(current_state_ref[0])
         
         
         

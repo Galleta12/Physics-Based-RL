@@ -36,7 +36,7 @@
             <site name="joint_front_x" rgba='1 0 0 1' pos="0.08 0 0.205" size="0.01 0.01 0.01" type="box"/>
             <body name="chest" pos="0 0 0.236151">
                 <geom name="chest" mass="14.0" pos="0 0 0.12" size=".11" type="sphere"/>
-                <joint name="chest_x" axis="1 0 0" pos="0 0 0" range="-1.2 1.2" type="hinge"/>
+                <joinst name="chest_x" axis="1 0 0" pos="0 0 0" range="-1.2 1.2" type="hinge"/>
                 <joint name="chest_y" axis="0 1 0" pos="0 0 0" range="-1.2 1.2" type="hinge"/>
                 <joint name="chest_z" axis="0 0 1" pos="0 0 0" range="-1.2 1.2" type="hinge"/>
                 <body name="neck" pos="0 0 0.223894">
