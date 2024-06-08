@@ -8,8 +8,8 @@ system_config: humanoid
 demo_replay_mode: threshold
 threshold: 0.4
 normalize_observations: True
-cycle_len: 0
-ep_len: 30
+cycle_len: 195
+ep_len: 39
 ep_len_eval: 54
 use_lr_scheduler: True
 reward_scaling: 0.02
@@ -31,4 +31,5 @@ deep_mimic_weights_factors:
 
 
 
-ref: motions/humanoid3d_walk.txt
+#ref: motions/humanoid3d_walk.txt
+ref: motions/humanoid3d_walk_duplicated.txt

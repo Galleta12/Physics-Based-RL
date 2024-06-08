@@ -197,9 +197,9 @@ class HumanoidTemplate(PipelineEnv):
         
         #jax.debug.print("new idx: {}",index_new)
         
-        initial_idx = state.metrics['step_index']
+        initial_idx = state.metrics['step_index'] +1
         #we want to check the next idx
-        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int64) + 1
+        current_step_inx =  jp.asarray(initial_idx%self.rollout_lenght, dtype=jp.int64)
         #jax.debug.print("current_step_idx: {}",current_step_inx)
         #get the reference state
         current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
