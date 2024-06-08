@@ -17,7 +17,7 @@ from some_math.math_utils import compute_cubic_trajectory
 def standard_pd_controller(target,sys:base.System,
                            state:State,q,qdot,kp_array,kd_array,time,dt):
     
-    jax.debug.print("Standard: {}", 1)
+    #jax.debug.print("Standard: {}", 1)
     #extract the root from the q pos and qdot
     q = q[7:]
     

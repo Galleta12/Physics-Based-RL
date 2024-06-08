@@ -91,8 +91,8 @@ class HumanoidTemplate(PipelineEnv):
         #the gains for the pd controller
         self.kp_gains,self.kd_gains = generate_kp_kd_gains()
         
-        #this it is the lenght, of the trajectory
-        self.rollout_lenght = self.reference_trajectory_qpos.shape[0]
+        #this it is the lenght, on args
+        self.rollout_lenght = args.ep_len
         
         self.rot_weight =  args.rot_weight
         self.vel_weight =  args.vel_weight
@@ -100,7 +100,7 @@ class HumanoidTemplate(PipelineEnv):
         self.reward_scaling= args.reward_scaling
         
         #for now it will be the same size
-        self.cycle_len = args.cycle_len if args.cycle_len !=0 else self.rollout_lenght  
+        self.cycle_len = self.reference_trajectory_qpos.shape[0]  
 
         
         #initial position
@@ -123,6 +123,8 @@ class HumanoidTemplate(PipelineEnv):
     #get a reference state from the referece trajectory
     #this is used on the reset only on the reset
     def get_reference_state(self,step_index):
+        
+        step_index =  jp.asarray(step_index, dtype=jp.int64)
         ref_qp = self.reference_trajectory_qpos[step_index]
         ref_qv = self.reference_trajectory_qvel[step_index]
         #now I will return a state depending on the index and the reference trajectory
@@ -132,6 +134,8 @@ class HumanoidTemplate(PipelineEnv):
     #this is imporant, since we keep two states at the same time
     #this will use its own sys
     def set_ref_state_pipeline(self,step_index,data:mjx.Data):
+        step_index =  jp.asarray(step_index, dtype=jp.int64)
+        
         ref_qp = self.reference_trajectory_qpos[step_index]
         ref_qv = self.reference_trajectory_qvel[step_index]
         #calculate the position of the refernece motion with forward kinematics
@@ -149,14 +153,18 @@ class HumanoidTemplate(PipelineEnv):
         
         #set this as zero
         reward, done, zero = jp.zeros(3)
-        #start at the initial state
-        data = self.get_reference_state(0)       
+        # Convert to float64
+        new_step_idx_float = jp.asarray(0, dtype=jp.float64)
+            
+       
+        data = self.get_reference_state(new_step_idx_float)       
         # qvel = jp.zeros(self.sys.nv)
         # qpos =  self.sys.qpos0
         # data = self.pipeline_init(qpos,qvel) 
         
-        metrics = {'step_index': 0, 'pose_error': zero, 'fall': zero}
-        obs = self._get_obs(data, 0)    
+        metrics = {'step_index': new_step_idx_float, 'pose_error': zero, 'fall': zero}
+        obs = self._get_obs(data,new_step_idx_float)    
+        
         #jax.debug.print("obs: {}",obs.shape)
         #the obs should be size 193?
         
@@ -197,9 +205,9 @@ class HumanoidTemplate(PipelineEnv):
         
         #jax.debug.print("new idx: {}",index_new)
         
-        initial_idx = state.metrics['step_index'] +1
-        #we want to check the next idx
-        current_step_inx =  jp.asarray(initial_idx%self.rollout_lenght, dtype=jp.int64)
+        initial_idx = state.metrics['step_index'] +1.0
+        current_step_inx =  jp.asarray(initial_idx%self.cycle_len, dtype=jp.float64)
+
         #jax.debug.print("current_step_idx: {}",current_step_inx)
         #get the reference state
         current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
@@ -322,12 +330,12 @@ class HumanoidTemplate(PipelineEnv):
         relative_pos , local_rotations,local_vel,local_ang = self.convertLocaDiff(data)
         
         relative_pos = relative_pos[1:]
-        #q_relative_pos,q_local_rotations, q_local_vel, q_local_ang = self.convertLocaDiff(data)
+        # #q_relative_pos,q_local_rotations, q_local_vel, q_local_ang = self.convertLocaDiff(data)
         
         local_rotations = local_rotations.at[0].set(data.x.rot[0])
         
         
-        #convert quat to 6d root
+        # #convert quat to 6d root
         rot_6D= quaternion_to_rotation_6d(local_rotations)
         
         # jax.debug.print("pos mine{}",relative_pos)
@@ -339,14 +347,68 @@ class HumanoidTemplate(PipelineEnv):
         # jax.debug.print("vel q{}", q_local_vel)
         # jax.debug.print("ang q{}", q_local_ang)
         #phi
+        
+        
+        
+        
         phi = (current_step_inx % self.cycle_len) / self.cycle_len
         
         phi = jp.asarray(phi)
         
         
         #jax.debug.print("phi{}", phi)
+       
         return jp.concatenate([relative_pos.ravel(),rot_6D.ravel(),
                                local_vel.ravel(),local_ang.ravel(),phi[None]])
+
+    # def _get_obs(self, data: base.State, step_idx: jp.ndarray)-> jp.ndarray:
+          
+    #     current_step_inx =  jp.asarray(step_idx, dtype=jp.int64)
+        
+        
+    #     #relative_pos , local_rotations,local_vel,local_ang = self.convert_local(data)
+    #     # relative_pos , local_rotations,local_vel,local_ang = self.convertLocaDiff(data)
+        
+    #     # relative_pos = relative_pos[1:]
+    #     # #q_relative_pos,q_local_rotations, q_local_vel, q_local_ang = self.convertLocaDiff(data)
+        
+    #     # local_rotations = local_rotations.at[0].set(data.x.rot[0])
+        
+        
+    #     # #convert quat to 6d root
+    #     # rot_6D= quaternion_to_rotation_6d(local_rotations)
+        
+    #     # jax.debug.print("pos mine{}",relative_pos)
+    #     # jax.debug.print("rot mine {}", local_rotations)
+    #     # jax.debug.print("vel mine{}", local_vel)
+    #     # jax.debug.print("ang mine{}", local_ang)
+    #     # jax.debug.print("pos q{}",q_relative_pos)
+    #     # jax.debug.print("rot q {}", q_local_rotations)
+    #     # jax.debug.print("vel q{}", q_local_vel)
+    #     # jax.debug.print("ang q{}", q_local_ang)
+    #     #phi
+        
+        
+    #     pos, rot, vel, ang = data.x.pos, data.x.rot, data.xd.vel, data.xd.ang
+        
+    #     root_pos = pos[0]
+    #     relative_pos = pos - root_pos
+    #     relative_pos = relative_pos[1:]
+        
+        
+    #     rot_6D= quaternion_to_rotation_6d(rot)
+        
+        
+    #     phi = (current_step_inx % self.cycle_len) / self.cycle_len
+        
+    #     phi = jp.asarray(phi)
+        
+        
+    #     #jax.debug.print("phi{}", phi)
+    #     return jp.concatenate([relative_pos.ravel(),rot_6D.ravel(),
+    #                            vel.ravel(),ang.ravel(),phi[None]])
+    #     # return jp.concatenate([relative_pos.ravel(),rot_6D.ravel(),
+    #     #                        local_vel.ravel(),local_ang.ravel(),phi[None]])
 
 
 

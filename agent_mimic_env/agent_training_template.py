@@ -57,7 +57,55 @@ class HumanoidTrainTemplate(HumanoidEvalTemplate):
         
         self.err_threshold = args.threshold
         
+    def reset(self, rng: jp.ndarray) -> State:
         
+        #set this as zero
+        reward, done, zero = jp.zeros(3)
+        #start at random initial state
+        #random state initialization (RSI)
+        #set on jax int 64 so this is a int64
+        new_step_idx = jax.random.randint(rng, shape=(), minval=0, maxval=self.rollout_lenght, dtype=jp.int64)
+        # Convert to float64
+        new_step_idx_float = jp.asarray(new_step_idx, dtype=jp.float64)
+            
+       
+        data = self.get_reference_state(new_step_idx_float)       
+        # qvel = jp.zeros(self.sys.nv)
+        # qpos =  self.sys.qpos0
+        # data = self.pipeline_init(qpos,qvel) 
+        
+        metrics = {'step_index': new_step_idx_float, 'pose_error': zero, 'fall': zero}
+        obs = self._get_obs(data,new_step_idx_float)    
+        
+        #jax.debug.print("obs: {}",obs.shape)
+        #the obs should be size 193?
+        
+        ref_qp = self.reference_trajectory_qpos[0]
+        
+        
+        state_info = {
+            'rng': rng,
+            'steps': 0.0,
+            'reward_tuple': {
+                'reference_position': 0.0,
+                'reference_rotation': 0.0,
+                'reference_velocity': 0.0,
+                'reference_angular': 0.0
+            },
+            # 'step_index':0.0,
+            # 'pose_error':0.0,
+            # 'fall': 0.0
+            
+        }
+        
+        #metrics = {}
+        #save the infor on the metrics
+        for k in state_info['reward_tuple']:
+            metrics[k] = state_info['reward_tuple'][k]
+        
+        state = State(data, obs, reward, done, metrics,state_info)
+           
+        return jax.lax.stop_gradient(state)    
         
     # def _demo_replay(self, state,ref_data_pos,current_idx)-> State:
     #     global_pos_state = state.x.pos
@@ -112,33 +160,34 @@ class HumanoidTrainTemplate(HumanoidEvalTemplate):
     def step(self, state: State, action: jp.ndarray) -> State:
         
         state = super(HumanoidTrainTemplate,self).step(state,action)
-        data = state.pipeline_state
+        # data = state.pipeline_state
         
-        #perform the demoreplay
-        idx = state.metrics['step_index']
-        idx_alg = jp.array(state.info['steps'], int)
-        current_step_inx =  jp.asarray(idx, dtype=jp.int64)
+        # #perform the demoreplay
+        # idx = state.metrics['step_index']
+        # idx_alg = jp.array(state.info['steps'], int)
+        # current_step_inx =  jp.asarray(idx, dtype=jp.int64)
         
-        #get the coordinates of the current step 
-        #get qpos and q vel
-        ref_data = self.set_ref_state_pipeline(current_step_inx,data)
-        #ref_qpos,ref_qvel=self.get_ref_qdata(current_step_inx)
+        # #get the coordinates of the current step 
+        # #get qpos and q vel
+        # ref_data = self.set_ref_state_pipeline(current_step_inx,data)
+        # #ref_qpos,ref_qvel=self.get_ref_qdata(current_step_inx)
      
-        # ref_data = data.replace(qpos=ref_qpos, qvel=ref_qvel)
-        # ref_data = mjx.forward(self.sys, ref_data)
-        # ref_x, ref_xd = ref_data.x, ref_data.xd
+        # # ref_data = data.replace(qpos=ref_qpos, qvel=ref_qvel)
+        # # ref_data = mjx.forward(self.sys, ref_data)
+        # # ref_x, ref_xd = ref_data.x, ref_data.xd
 
-        #perform the demoreplay
-        new_ref_data,to_reference = self._demoreplay(data,ref_data)
+        # #perform the demoreplay
+        # new_ref_data,to_reference = self._demoreplay(data,ref_data)
         
         
-        data = jax.tree_util.tree_map(lambda x, y: 
-                                  jp.array((1-to_reference)*x + to_reference*y, x.dtype), data, new_ref_data)
+        # data = jax.tree_util.tree_map(lambda x, y: 
+        #                           jp.array((1-to_reference)*x + to_reference*y, x.dtype), data, new_ref_data)
 
         
-        obs = self._get_obs(data,current_step_inx)
+        # obs = self._get_obs(data,current_step_inx)
         
-        return state.replace(pipeline_state=data, obs=obs) 
+        #return state.replace(pipeline_state=data, obs=obs) 
+        return state 
     
     
     def step_custom(self, state: State, action: jp.ndarray) -> State:
