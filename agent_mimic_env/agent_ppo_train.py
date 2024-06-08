@@ -106,6 +106,7 @@ class HumanoidPPOENV(HumanoidTemplate):
         state = State(data, obs, reward, done, metrics,state_info)
            
         return jax.lax.stop_gradient(state)
+        #return state
     
     
     def step(self, state: State, action: jp.ndarray) -> State:
@@ -120,7 +121,7 @@ class HumanoidPPOENV(HumanoidTemplate):
         #deltatime of physics
         dt = self.sys.opt.timestep
         
-            
+        action = jp.clip(action, -1, 1) # Raw action  
         #target_angles = action * jp.pi * 1.2
         #exclude the root
         target_angles = self._inital_pos[7:] +(action * jp.pi * 1.2)
@@ -321,22 +322,30 @@ class HumanoidPPOENV(HumanoidTemplate):
         #in the calculation we include the root
         
         #chenge the order to use the quat diff from insactor paper
-        current_quat = local_rot[:, [1, 2, 3, 0]] 
-        ref_quat = current_state_ref[:, [1, 2, 3, 0]] 
+        # current_quat = local_rot[:, [1, 2, 3, 0]] 
+        # ref_quat = current_state_ref[:, [1, 2, 3, 0]] 
         
-        current_quat_normalized = diff_quat.quat_normalize(current_quat) 
-        ref_quat_normalized = diff_quat.quat_normalize(ref_quat)
-        quat_diff= diff_quat.quat_mul_norm(current_quat_normalized,diff_quat.quat_inverse(ref_quat_normalized))
+        # current_quat_normalized = diff_quat.quat_normalize(current_quat) 
+        # ref_quat_normalized = diff_quat.quat_normalize(ref_quat)
+        # quat_diff= diff_quat.quat_mul_norm(current_quat_normalized,diff_quat.quat_inverse(ref_quat_normalized))
 
         
-        # Get the scalar rotation to get difference displacement
-        # Assuming the quaternion is [x, y, z, w], with w at the last position:
-        angles = 2 * jp.arccos(jp.clip(jp.abs(quat_diff[:, 3]), -1.0, 1.0))
+        # # Get the scalar rotation to get difference displacement
+        # # Assuming the quaternion is [x, y, z, w], with w at the last position:
+        # angles = 2 * jp.arccos(jp.clip(jp.abs(quat_diff[:, 3]), -1.0, 1.0))
         
         
-        norm = jp.linalg.norm(angles)
+        # norm = jp.linalg.norm(angles)
         
-        quat_reward = jp.exp(-self.w_pose *(norm**2))
+        # quat_reward = jp.exp(-self.w_pose *(norm**2))
+        
+        current_rot6D = quaternion_to_rotation_6d(local_rot)
+        ref_rot6D = quaternion_to_rotation_6d(current_state_ref)
+        
+        rot_dist = jp.linalg.norm(current_rot6D - ref_rot6D)
+        
+        quat_reward = jp.exp(-self.w_pose * (rot_dist**2))
+
         
         #jax.debug.print("quat diff result:{}",quat_reward)
         

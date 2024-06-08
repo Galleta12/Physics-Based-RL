@@ -172,7 +172,6 @@ class HumanoidTemplate(PipelineEnv):
                 'reference_velocity': 0.0,
                 'reference_angular': 0.0
             },
-            'kinematic_ref': ref_qp
             # 'step_index':0.0,
             # 'pose_error':0.0,
             # 'fall': 0.0
@@ -205,8 +204,6 @@ class HumanoidTemplate(PipelineEnv):
         #get the reference state
         current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
         
-        #updates in the info
-        state.info['kinematic_ref'] = current_state_ref.qpos
          
         #perform forward kinematics to do the same movement that is on the reference trajectory
         #this is just for demostration that the trajectory data is working properly
@@ -214,7 +211,7 @@ class HumanoidTemplate(PipelineEnv):
         
         #here I will do the fall
         #check on the z axis
-        fall = jp.where(data.qpos[2] < 0.2, 1.0, 0.0)
+        fall = jp.where(data.qpos[2] < 0.5, 1.0, 0.0)
         fall = jp.where(data.qpos[2] > 1.7, 1.0, fall)
         
         
@@ -314,28 +311,29 @@ class HumanoidTemplate(PipelineEnv):
     
      
     
-     #standard obs this will changed on other derived
+    #standard obs this will changed on other derived
     #classes from this
     def _get_obs(self, data: base.State, step_idx: jp.ndarray)-> jp.ndarray:
           
         current_step_inx =  jp.asarray(step_idx, dtype=jp.int64)
         
         
-        relative_pos , local_rotations,local_vel,local_ang = self.convert_local(data)
-        #relative_pos , local_rotations,local_vel,local_ang = self.convertLocaDiff(data)
+        #relative_pos , local_rotations,local_vel,local_ang = self.convert_local(data)
+        relative_pos , local_rotations,local_vel,local_ang = self.convertLocaDiff(data)
         
         relative_pos = relative_pos[1:]
         #q_relative_pos,q_local_rotations, q_local_vel, q_local_ang = self.convertLocaDiff(data)
         
+        local_rotations = local_rotations.at[0].set(data.x.rot[0])
+        
+        
         #convert quat to 6d root
         rot_6D= quaternion_to_rotation_6d(local_rotations)
-        
         
         # jax.debug.print("pos mine{}",relative_pos)
         # jax.debug.print("rot mine {}", local_rotations)
         # jax.debug.print("vel mine{}", local_vel)
         # jax.debug.print("ang mine{}", local_ang)
-        
         # jax.debug.print("pos q{}",q_relative_pos)
         # jax.debug.print("rot q {}", q_local_rotations)
         # jax.debug.print("vel q{}", q_local_vel)
@@ -349,6 +347,8 @@ class HumanoidTemplate(PipelineEnv):
         #jax.debug.print("phi{}", phi)
         return jp.concatenate([relative_pos.ravel(),rot_6D.ravel(),
                                local_vel.ravel(),local_ang.ravel(),phi[None]])
+
+
 
 
     

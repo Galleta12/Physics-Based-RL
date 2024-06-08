@@ -63,6 +63,8 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         
         #perform the action of the policy
         #current qpos and qvel for the torque    
+        #perform the action of the policy
+        #current qpos and qvel for the torque    
         qpos = state.pipeline_state.q
         qvel = state.pipeline_state.qd
 
@@ -71,18 +73,17 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         #deltatime of physics
         dt = self.sys.opt.timestep
         
-        
-        target_angles = action * jp.pi * 1.2
+        action = jp.clip(action, -1, 1) # Raw action  
+        #target_angles = action * jp.pi * 1.2
+        #exclude the root
+        target_angles = self._inital_pos[7:] +(action * jp.pi * 1.2)
         #target_angles = action 
         
         torque = self.pd_function(target_angles,self.sys,state,qpos,qvel,
                                  self.kp_gains,self.kd_gains,timeEnv,dt) 
         
         data = self.pipeline_step(state.pipeline_state,torque)
-        #data = self.pipeline_init(current_state_ref.qpos, current_state_ref.qvel)
-        
-        
-        
+                
         index_new =jp.array(state.info['steps']%self.cycle_len, int)
         
         #jax.debug.print("new idx: {}",index_new)
@@ -94,13 +95,8 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         
         current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
 
-        #updates in the info
-        state.info['kinematic_ref'] = current_state_ref.qpos
-        
-        
-       
         fall=0.0
-        fall = jp.where(data.qpos[2] < 0.2, 1.0, fall)
+        fall = jp.where(data.qpos[2] < 0.5, 1.0, fall)
         fall = jp.where(data.qpos[2] > 1.7, 1.0, fall)
         
         #get the observations
@@ -119,10 +115,6 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         global_pos_state = data.x.pos
         global_pos_ref = current_state_ref.x.pos
         pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
-        
-        # state.info['step_index'] = current_step_inx
-        # state.info['pose_error'] = pose_error
-        # state.info['fall'] = fall
         
         
         state.metrics.update(
@@ -150,7 +142,7 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
 
         #updates in the info
-        state.info['kinematic_ref'] = current_state_ref.qpos
+       
         #current qpos and qvel for the torque    
         qpos = state.pipeline_state.q
         qvel = state.pipeline_state.qd
@@ -167,7 +159,7 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         
         
         fall=0.0
-        fall = jp.where(data.qpos[2] < 0.2, 1.0, fall)
+        fall = jp.where(data.qpos[2] < 0.5, 1.0, fall)
         fall = jp.where(data.qpos[2] > 1.7, 1.0, fall)
         
         
