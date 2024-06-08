@@ -62,7 +62,7 @@ class HumanoidTemplate(PipelineEnv):
         # mj_model.opt.iterations = 6
         # mj_model.opt.ls_iterations = 6
             
-        #physics_steps_per_control_step = 10
+        physics_steps_per_control_step = 10
         
         sys = mjcf.load_model(mj_model)
         
@@ -413,7 +413,14 @@ class HumanoidTemplate(PipelineEnv):
     
     def _com(self, pipeline_state: base.State) -> jax.Array:
         inertia = self.sys.link.inertia
-        
+        if self.backend in ['spring', 'positional']:
+            inertia = inertia.replace(
+                i=jax.vmap(jp.diag)(
+                    jax.vmap(jp.diagonal)(inertia.i)
+                    ** (1 - self.sys.spring_inertia_scale)
+                ),
+                mass=inertia.mass ** (1 - self.sys.spring_mass_scale),
+            )
         mass_sum = jp.sum(inertia.mass)
         x_i = pipeline_state.x.vmap().do(inertia.transform)
         com = (

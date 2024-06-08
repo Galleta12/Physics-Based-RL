@@ -253,8 +253,10 @@ class HumanoidPPOENV(HumanoidTemplate):
         current_ee = data.geom_xpos[self.dict_ee]
         current_ref_ee = current_state_ref.geom_xpos[self.dict_ee]
                
-        com_current = self.get_com(data)
-        ref_com = self.get_com(current_state_ref)
+        com_current,_,_,_ = self._com(data)
+        ref_com,_,_,_ = self._com(current_state_ref)
+        # com_current = self.get_com(data)
+        # ref_com = self.get_com(current_state_ref)
         
         reward_tuple = {
             'reference_quaternions': (
@@ -338,6 +340,11 @@ class HumanoidPPOENV(HumanoidTemplate):
         # norm = jp.linalg.norm(angles)
         
         # quat_reward = jp.exp(-self.w_pose *(norm**2))
+        
+        local_rot = local_rot.at[0].set(local_rot.x.rot[0])
+        current_state_ref = current_state_ref.at[0].set(current_state_ref.x.rot[0])
+        
+        
         
         current_rot6D = quaternion_to_rotation_6d(local_rot)
         ref_rot6D = quaternion_to_rotation_6d(current_state_ref)
