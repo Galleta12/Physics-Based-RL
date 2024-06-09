@@ -25,7 +25,7 @@ def register_ppo_env(args) -> HumanoidPPOENV:
         
     trajectory = SimpleConverter(args.ref)
     trajectory.load_mocap()
-    model_path = 'models/final_humanoid.xml'
+    model_path = 'models/final_humanoid2.xml'
     
     envs.register_environment('humanoidPPOEnv',HumanoidPPOENV)
     env_name_ppo = 'humanoidPPOEnv'

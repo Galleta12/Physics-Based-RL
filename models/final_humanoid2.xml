@@ -2,7 +2,7 @@
     <!-- <option gravity="0 0 0"/> -->
     <compiler angle="radian" inertiafromgeom="true" autolimits="true"/>
     
-    <option iterations="1" ls_iterations="6" solver="Newton" cone="pyramidal" impratio="100">
+    <option iterations="1" ls_iterations="4" solver="Newton" cone="pyramidal" impratio="100">
         <flag eulerdamp="disable"/>
     </option>
      
@@ -13,7 +13,8 @@
         <site rgba="0.7 0.5 0.3 1"/>
         
         <default class="affine">
-            <position  ctrlrange="-6.28 6.28" forcerange="-80 80"/>
+            <!-- <position  ctrlrange="-6.28 6.28" forcerange="-80 80"/> -->
+            <position ctrllimited="true"  ctrlrange="-3.14 3.14" forcerange="-80 80"/>
       </default>
         
 

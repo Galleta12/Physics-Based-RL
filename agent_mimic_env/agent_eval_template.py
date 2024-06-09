@@ -79,11 +79,11 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         target_angles = self._inital_pos[7:] +(action * jp.pi * 1.2)
         #target_angles = action 
         
-        torque = self.pd_function(target_angles,self.sys,state,qpos,qvel,
-                                 self.kp_gains,self.kd_gains,timeEnv,dt) 
+        # torque = self.pd_function(target_angles,self.sys,state,qpos,qvel,
+        #                          self.kp_gains,self.kd_gains,timeEnv,dt) 
         
-        data = self.pipeline_step(state.pipeline_state,torque)
-        #data = self.pipeline_step(state.pipeline_state,target_angles)
+        #data = self.pipeline_step(state.pipeline_state,torque)
+        data = self.pipeline_step(state.pipeline_state,target_angles)
                 
         index_new =jp.array(state.info['steps']%self.cycle_len, int)
         
@@ -135,70 +135,69 @@ class HumanoidEvalTemplate(HumanoidTemplate):
     
     
     
-    # #class for testing step_custom where we just check the pd controller
-    # def step_custom(self, state: State, action: jp.ndarray) -> State:
+    #class for testing step_custom where we just check the pd controller
+    def step_custom(self, state: State, action: jp.ndarray) -> State:
         
-    #     index_new =jp.array(state.info['steps']%self.cycle_len, int)
-    #     #jax.debug.print("new idx: {}",index_new)
+        index_new =jp.array(state.info['steps']%self.cycle_len, int)
+        #jax.debug.print("new idx: {}",index_new)
         
-    #     initial_idx = state.metrics['step_index'] +1
-    #     current_step_inx =  jp.asarray(initial_idx%self.cycle_len, dtype=jp.int64)
-        
-    #     current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
+        initial_idx = state.metrics['step_index'] +1.0
+        current_step_inx =  jp.asarray(initial_idx%self.cycle_len, dtype=jp.float64)
 
-    #     #updates in the info
+        
+        current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
+
+
+        #updates in the info
        
-    #     #current qpos and qvel for the torque    
-    #     qpos = state.pipeline_state.q
-    #     qvel = state.pipeline_state.qd
+        #current qpos and qvel for the torque    
+        qpos = state.pipeline_state.q
+        qvel = state.pipeline_state.qd
 
-    #     timeEnv = state.pipeline_state.time
+        timeEnv = state.pipeline_state.time
         
-    #     #deltatime of physics
-    #     dt = self.sys.opt.timestep
+        #deltatime of physics
+        dt = self.sys.opt.timestep
         
-    #     #jax.debug.print("time{}",timeEnv)
-    #     torque = self.pd_function(current_state_ref.qpos[7:],self.sys,state,qpos,qvel,
-    #                              self.kp_gains,self.kd_gains,timeEnv,dt) 
-    #     data = self.pipeline_step(state.pipeline_state,torque)
+        #jax.debug.print("time{}",timeEnv)
         
         
-    #     fall=0.0
-    #     fall = jp.where(data.qpos[2] < 0.5, 1.0, fall)
-    #     fall = jp.where(data.qpos[2] > 1.7, 1.0, fall)
+        torque = self.pd_function(current_state_ref.qpos[7:],self.sys,state,qpos,qvel,
+                                 self.kp_gains,self.kd_gains,timeEnv,dt) 
+        data = self.pipeline_step(state.pipeline_state,torque)
+        
+        fall=0.0
+        fall = jp.where(data.qpos[2] < 0.5, 1.0, fall)
+        fall = jp.where(data.qpos[2] > 1.7, 1.0, fall)
+        #jax.debug.print("fall{}",fall)
         
         
-    #     #get the observations
-    #     obs = self._get_obs(data, current_step_inx)
+        #get the observations
+        obs = self._get_obs(data, current_step_inx)
         
-    #     reward, reward_tuple = self.compute_rewards_diffmimic(data,current_state_ref)
+        reward, reward_tuple = self.compute_rewards_diffmimic(data,current_state_ref)
         
           
-    #     #state mangement
-    #     state.info['reward_tuple'] = reward_tuple
+        #state mangement
+        state.info['reward_tuple'] = reward_tuple
         
-    #     for k in state.info['reward_tuple'].keys():
-    #         state.metrics[k] = state.info['reward_tuple'][k]
-        
-        
-    #     global_pos_state = data.x.pos
-    #     global_pos_ref = current_state_ref.x.pos
-    #     pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
-        
-    #     # state.info['step_index'] = current_step_inx
-    #     # state.info['pose_error'] = pose_error
-    #     # state.info['fall'] = fall
+        for k in state.info['reward_tuple'].keys():
+            state.metrics[k] = state.info['reward_tuple'][k]
         
         
-    #     state.metrics.update(
-    #         step_index=current_step_inx,
-    #         pose_error=pose_error,
-    #         fall=fall,
-    #     )
+        global_pos_state = data.x.pos
+        global_pos_ref = current_state_ref.x.pos
+        pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
+         
+        state.metrics.update(
+            step_index=current_step_inx,
+            pose_error=pose_error,
+            fall=fall,
+        )
         
-    #     return state.replace(
-    #         pipeline_state= data, obs=obs, reward=reward, done=fall
-    #     )
+        return state.replace(
+            pipeline_state= data, obs=obs, reward=reward, done=fall
+        )
         
         
     

@@ -72,7 +72,8 @@ class HumanoidTemplate(PipelineEnv):
         
         sys = sys.tree_replace({'opt.timestep': 0.002})
         
-        n_frames = kwargs.pop('n_frames', int(self._dt / 0.002))
+        #n_frames = kwargs.pop('n_frames', int(self._dt / 0.002))
+        n_frames = kwargs.pop('n_frames',  physics_steps_per_control_step)
         
         super().__init__(sys, backend='mjx', n_frames=n_frames)
         #this is to keep separate the sys of the agent
