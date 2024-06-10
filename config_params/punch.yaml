@@ -14,7 +14,7 @@ ep_len_eval: 54
 use_lr_scheduler: True
 reward_scaling: 0.02
 rot_weight: 0.5
-vel_weight: 0.01
+vel_weight: 0.3
 ang_weight: 0.01
 
 deep_mimic_reward_weights:
@@ -32,7 +32,7 @@ deep_mimic_weights_factors:
 
 
 
-
+model: models/final_humanoid.xml
 
 #ref: motions/humanoid3d_punch.txt
 ref: motions/humanoid3d_punch_duplicated.txt

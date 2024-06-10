@@ -103,12 +103,6 @@ class HumanoidTemplate(PipelineEnv):
         #for now it will be the same size
         self.cycle_len = self.reference_trajectory_qpos.shape[0]  
 
-        
-        #initial position
-        #the initial position
-        self._inital_pos = self.reference_trajectory_qpos[0]
-        
-        
         #ind for the end-effect reward of deepmimic
         #this is located on the geom_xpos
         #right_wrist,left_writst,right_ankle,left_ankle
@@ -155,8 +149,10 @@ class HumanoidTemplate(PipelineEnv):
         #set this as zero
         reward, done, zero = jp.zeros(3)
         # Convert to float64
-        new_step_idx_float = jp.asarray(0, dtype=jp.float64)
-            
+        #new_step_idx_float = jp.asarray(0, dtype=jp.float64)
+        new_step_idx = jax.random.randint(rng, shape=(), minval=0, maxval=self.rollout_lenght, dtype=jp.int64)
+        # Convert to float64
+        new_step_idx_float = jp.asarray(new_step_idx, dtype=jp.float64)   
        
         data = self.get_reference_state(new_step_idx_float)       
         # qvel = jp.zeros(self.sys.nv)
@@ -164,13 +160,11 @@ class HumanoidTemplate(PipelineEnv):
         # data = self.pipeline_init(qpos,qvel) 
         
         metrics = {'step_index': new_step_idx_float, 'pose_error': zero, 'fall': zero}
-        obs = self._get_obs(data,new_step_idx_float)    
         
         #jax.debug.print("obs: {}",obs.shape)
         #the obs should be size 193?
         
-        ref_qp = self.reference_trajectory_qpos[0]
-        
+        ref_qp = data.qpos
         
         state_info = {
             'rng': rng,
@@ -179,14 +173,15 @@ class HumanoidTemplate(PipelineEnv):
                 'reference_position': 0.0,
                 'reference_rotation': 0.0,
                 'reference_velocity': 0.0,
-                'reference_angular': 0.0
+                'reference_angular': 0.0,
+                'min_reference_tracking': 0.0
             },
-            # 'step_index':0.0,
-            # 'pose_error':0.0,
-            # 'fall': 0.0
-            
+            'default_pos': ref_qp,
+            'last_action':jp.zeros(28),
+            'kinematic_ref': ref_qp     
         }
         
+        obs = self._get_obs(data,new_step_idx_float,state_info)    
         #metrics = {}
         #save the infor on the metrics
         for k in state_info['reward_tuple']:
@@ -223,13 +218,16 @@ class HumanoidTemplate(PipelineEnv):
         fall = jp.where(data.qpos[2] < 0.5, 1.0, 0.0)
         fall = jp.where(data.qpos[2] > 1.7, 1.0, fall)
         
-        
-        obs = self._get_obs(data, current_step_inx)
-        
-        reward, reward_tuple = self.compute_rewards_diffmimic(data,current_state_ref)
-        
         #state mangement
+        reward, reward_tuple = self.compute_rewards_diffmimic(data,current_state_ref)
+        state.info['last_action'] = action
+        state.info['kinematic_ref'] = current_state_ref.qpos
         state.info['reward_tuple'] = reward_tuple
+        
+        
+        obs = self._get_obs(data, current_step_inx,state.info)
+        
+        
         
         for k in state.info['reward_tuple'].keys():
             state.metrics[k] = state.info['reward_tuple'][k]
@@ -239,9 +237,6 @@ class HumanoidTemplate(PipelineEnv):
         global_pos_ref = current_state_ref.x.pos
         pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
         
-        # state.info['step_index'] = current_step_inx
-        # state.info['pose_error'] = pose_error
-        # state.info['fall'] = fall
         state.metrics.update(
             step_index=current_step_inx,
             pose_error=pose_error,
@@ -300,14 +295,17 @@ class HumanoidTemplate(PipelineEnv):
             ),
             'reference_angular': (
                 mse_ang(global_ang_state, global_ang_ref)*  self.ang_weight
+            ),
+            'min_reference_tracking':(
+              self._reward_min_reference_tracking(data.qpos,current_state_ref.qvel,data)
+              *2.5 * 3e-3
             )   
         }
         
         reward = -1*sum(reward_tuple.values()) * self.reward_scaling
         
+        #reward = jp.where(reward < -1e-6 ,0.0,reward )
         
-        
-    
         return reward, reward_tuple
         # return -1 * (mse_pos(global_pos_state, global_pos_ref) +
         #     self.rot_weight * mse_rot(global_rot_state, global_rot_ref) +
@@ -322,7 +320,7 @@ class HumanoidTemplate(PipelineEnv):
     
     #standard obs this will changed on other derived
     #classes from this
-    def _get_obs(self, data: base.State, step_idx: jp.ndarray)-> jp.ndarray:
+    def _get_obs(self, data: base.State, step_idx: jp.ndarray,state_info: Dict[str, Any])-> jp.ndarray:
           
         current_step_inx =  jp.asarray(step_idx, dtype=jp.int64)
         
@@ -349,18 +347,19 @@ class HumanoidTemplate(PipelineEnv):
         # jax.debug.print("ang q{}", q_local_ang)
         #phi
         
-        
-        
-        
         phi = (current_step_inx % self.cycle_len) / self.cycle_len
         
         phi = jp.asarray(phi)
         
         
         #jax.debug.print("phi{}", phi)
-       
+        #I will add the last action
+        last_ref = state_info['kinematic_ref']
+        
+        
         return jp.concatenate([relative_pos.ravel(),rot_6D.ravel(),
-                               local_vel.ravel(),local_ang.ravel(),phi[None]])
+                               local_vel.ravel(),local_ang.ravel(),
+                               phi[None]])
 
     # def _get_obs(self, data: base.State, step_idx: jp.ndarray)-> jp.ndarray:
           
@@ -470,6 +469,26 @@ class HumanoidTemplate(PipelineEnv):
     
     
     
+    def _reward_min_reference_tracking(self, ref_qpos, ref_qvel, data):
+        """ 
+        Using minimal coordinates. Improves accuracy of joint angle tracking.
+        """
+        pos = jp.concatenate([
+        data.qpos[:3],
+        data.qpos[7:]])
+        pos_targ = jp.concatenate([
+        ref_qpos[:3],
+        ref_qpos[7:]])
+        
+        
+
+
+        pos_err = (((pos-pos_targ) ** 2).sum(-1) ** 0.5).mean()
+        vel_err = (((data.qvel- ref_qvel) ** 2).sum(-1) ** 0.5).mean()
+        
+        
+        return pos_err + vel_err
+        
     
     
     

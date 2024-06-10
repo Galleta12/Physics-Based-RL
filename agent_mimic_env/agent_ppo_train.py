@@ -73,18 +73,24 @@ class HumanoidPPOENV(HumanoidTemplate):
     
     def reset(self, rng: jp.ndarray) -> State:
         
-        #set this as zero
         reward, done, zero = jp.zeros(3)
-        #start at the initial state
-        data = self.get_reference_state(0)       
+        # Convert to float64
+        #new_step_idx_float = jp.asarray(0, dtype=jp.float64)
+        new_step_idx = jax.random.randint(rng, shape=(), minval=0, maxval=self.rollout_lenght, dtype=jp.int64)
+        # Convert to float64
+        new_step_idx_float = jp.asarray(new_step_idx, dtype=jp.float64)   
+       
+        data = self.get_reference_state(new_step_idx_float)       
         # qvel = jp.zeros(self.sys.nv)
         # qpos =  self.sys.qpos0
         # data = self.pipeline_init(qpos,qvel) 
         
-        metrics = {'step_index': 0, 'pose_error': zero, 'fall': zero}
-        obs = self._get_obs(data, 0)    
+        metrics = {'step_index': new_step_idx_float, 'pose_error': zero, 'fall': zero}
+        
         #jax.debug.print("obs: {}",obs.shape)
         #the obs should be size 193?
+        
+        ref_qp = data.qpos
 
         state_info = {
             'rng': rng,
@@ -95,9 +101,13 @@ class HumanoidPPOENV(HumanoidTemplate):
                 'reference_end_effector': 0.0,
                 'reference_com': 0.0
             },
+            'default_pos': ref_qp,
+            'last_action':jp.zeros(28),
+            'kinematic_ref': ref_qp     
     
         }
         
+        obs = self._get_obs(data,new_step_idx_float,state_info) 
         #metrics = {}
         #save the infor on the metrics
         for k in state_info['reward_tuple']:
@@ -108,52 +118,54 @@ class HumanoidPPOENV(HumanoidTemplate):
         return jax.lax.stop_gradient(state)
         #return state
     
-    
+  
     def step(self, state: State, action: jp.ndarray) -> State:
         
         #perform the action of the policy
         #current qpos and qvel for the torque    
+        #perform the action of the policy
+        #current qpos and qvel for the torque    
         qpos = state.pipeline_state.q
         qvel = state.pipeline_state.qd
-
         timeEnv = state.pipeline_state.time
-
         #deltatime of physics
         dt = self.sys.opt.timestep
         
         action = jp.clip(action, -1, 1) # Raw action  
         #target_angles = action * jp.pi * 1.2
         #exclude the root
-        target_angles = self._inital_pos[7:] +(action * jp.pi * 1.2)
+        target_angles = state.info['default_pos'][7:] +(action * jp.pi * 1.2)
         #target_angles = action 
         
         torque = self.pd_function(target_angles,self.sys,state,qpos,qvel,
                                  self.kp_gains,self.kd_gains,timeEnv,dt) 
         
         data = self.pipeline_step(state.pipeline_state,torque)
+        #data = self.pipeline_step(state.pipeline_state,target_angles)
                 
         index_new =jp.array(state.info['steps']%self.cycle_len, int)
+                
         
-        #jax.debug.print("new idx: {}",index_new)
-        
-        
-        
-        initial_idx =  state.metrics['step_index']
-        current_step_inx =  jp.asarray(initial_idx, dtype=jp.int64) + 1
-        
+        initial_idx = state.metrics['step_index'] +1.0
+        current_step_inx =  jp.asarray(initial_idx%self.cycle_len, dtype=jp.float64)
+
         current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
 
+        
         fall=0.0
         fall = jp.where(data.qpos[2] < 0.5, 1.0, fall)
         fall = jp.where(data.qpos[2] > 1.7, 1.0, fall)
         
-        #get the observations
-        obs = self._get_obs(data, current_step_inx)
-        
         reward, reward_tuple = self.compute_rewards_deepmimic(data,current_state_ref)
         
+        #get the observations
         #state mangement
+        state.info['last_action'] = action
+        state.info['kinematic_ref'] = current_state_ref.qpos
         state.info['reward_tuple'] = reward_tuple
+        
+        obs = self._get_obs(data, current_step_inx,state.info)
+        
         
         for k in state.info['reward_tuple'].keys():
             state.metrics[k] = state.info['reward_tuple'][k]
@@ -175,67 +187,72 @@ class HumanoidPPOENV(HumanoidTemplate):
             pipeline_state= data, obs=obs, reward=reward, done=fall
         )
         
-    # def step(self, state: State, action: jp.ndarray) -> State:
+    
+    
+    
+    #class for testing step_custom where we just check the pd controller
+    def step_custom(self, state: State, action: jp.ndarray) -> State:
         
-    #     #this doesnt increment it might increment with the algorithms?
-    #     index_new =jp.array(state.info['steps']%self.cycle_len, int)
+        initial_idx = state.metrics['step_index'] +1.0
+        current_step_inx =  jp.asarray(initial_idx%self.cycle_len, dtype=jp.float64)
+        current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
+           
+        qpos = state.pipeline_state.q
+        qvel = state.pipeline_state.qd
+        timeEnv = state.pipeline_state.time
+        #deltatime of physics
+        dt = self.sys.opt.timestep
         
-    #     #jax.debug.print("new idx: {}",index_new)
+        #target_angles = action * jp.pi * 1.2
+        #exclude the root
+        target_angles = state.info['default_pos'][7:] +(current_state_ref.qpos[7:]* jp.pi * 1.2)
+        #target_angles = action 
         
-    #     initial_idx = state.metrics['step_index']
-    #     #we want to check the next idx
-    #     current_step_inx =  jp.asarray(initial_idx, dtype=jp.int64) + 1
-    #     #jax.debug.print("current_step_idx: {}",current_step_inx)
-    #     #get the reference state
-    #     current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
+        torque = self.pd_function(current_state_ref.qpos[7:],self.sys,state,qpos,qvel,
+                                 self.kp_gains,self.kd_gains,timeEnv,dt) 
         
-    #     qpos = state.pipeline_state.q
-    #     qvel = state.pipeline_state.qd
-
-    #     timeEnv = state.pipeline_state.time
+        data = self.pipeline_step(state.pipeline_state,torque)
+        #data = self.pipeline_step(state.pipeline_state,target_angles)
+        #data = self.pipeline_init(current_state_ref.qpos,current_state_ref.qvel)
+                
+        index_new =jp.array(state.info['steps']%self.cycle_len, int)
+                
         
-    #     #deltatime of physics
-    #     dt = self.sys.opt.timestep
+        fall=0.0
+        fall = jp.where(data.qpos[2] < 0.5, 1.0, fall)
+        fall = jp.where(data.qpos[2] > 1.7, 1.0, fall)
         
+        reward, reward_tuple = self.compute_rewards_deepmimic(data,current_state_ref)
         
-    #     torque = self.pd_function(current_state_ref.qpos[7:],self.sys,state,qpos,qvel,
-    #                              self.kp_gains,self.kd_gains,timeEnv,dt) 
-    #     data = self.pipeline_step(state.pipeline_state,torque)      
-    #     #perform forward kinematics to do the same movement that is on the reference trajectory
-    #     #this is just for demostration that the trajectory data is working properly
-    #     #data = self.pipeline_init(current_state_ref.qpos, current_state_ref.qvel)
+        #get the observations
+        #state mangement
+        state.info['last_action'] = action
+        state.info['kinematic_ref'] = current_state_ref.qpos
+        state.info['reward_tuple'] = reward_tuple
         
-    #     #here I will do the fall
-    #     #check on the z axis
-    #     fall = jp.where(data.qpos[2] < 0.3, 1.0, 0.0)
-    #     fall = jp.where(data.qpos[2] > 1.7, 1.0, fall)
-        
-        
-    #     obs = self._get_obs(data, current_step_inx)
-        
-    #     reward, reward_tuple = self.compute_rewards_deepmimic(data,current_state_ref)
-        
-    #     #state mangement
-    #     state.info['reward_tuple'] = reward_tuple
-        
-    #     for k in state.info['reward_tuple'].keys():
-    #         state.metrics[k] = state.info['reward_tuple'][k]
-        
-        
-    #     global_pos_state = data.x.pos
-    #     global_pos_ref = current_state_ref.x.pos
-    #     pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
+        obs = self._get_obs(data, current_step_inx,state.info)
         
         
-    #     state.metrics.update(
-    #         step_index=current_step_inx,
-    #         pose_error=pose_error,
-    #         fall=fall,
-    #     )
+        for k in state.info['reward_tuple'].keys():
+            state.metrics[k] = state.info['reward_tuple'][k]
         
-    #     return state.replace(
-    #         pipeline_state= data, obs=obs, reward=reward, done=fall
-    #     )
+        
+        
+        global_pos_state = data.x.pos
+        global_pos_ref = current_state_ref.x.pos
+        pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
+        
+        
+        state.metrics.update(
+            step_index=current_step_inx,
+            pose_error=pose_error,
+            fall=fall,
+        )
+        
+        return state.replace(
+            pipeline_state= data, obs=obs, reward=reward, done=fall
+        )
+        
     
     
  
@@ -252,7 +269,11 @@ class HumanoidPPOENV(HumanoidTemplate):
         #data for the end effector reward
         current_ee = data.geom_xpos[self.dict_ee]
         current_ref_ee = current_state_ref.geom_xpos[self.dict_ee]
-               
+        
+        # jax.debug.print('current',current_ee.shape)
+        # jax.debug.print('currentref',current_ref_ee.shape)
+        
+        
         com_current,_,_,_ = self._com(data)
         ref_com,_,_,_ = self._com(current_state_ref)
         # com_current = self.get_com(data)
@@ -282,28 +303,25 @@ class HumanoidPPOENV(HumanoidTemplate):
         
     
     def com_reward(self,com_current, ref_com):
-        
-        
         # jax.debug.print("com result local:{}",com_current)
-        # jax.debug.print("ref com result ref:{}",ref_com)
-        
-        
-        com_dist = jp.linalg.norm(com_current - ref_com)         
-        com_reward = jp.exp(-self.w_com * (com_dist**2))
+        # jax.debug.print("ref com result ref:{}",ref_com)    
+        # com_dist = jp.linalg.norm(com_current - ref_com)         
+        # com_reward = jp.exp(-self.w_com * (com_dist**2))
+        com_dist_squared = jp.sum((com_current - ref_com) ** 2)
+        com_reward = jp.exp(-self.w_com * com_dist_squared)
         return com_reward
         
     
     
     def end_effector_diff(self,current_ee,current_ref_ee):
         # jax.debug.print("end diff result local:{}",current_ee)
-        # jax.debug.print("end diff result ref:{}",current_ref_ee)
-                
-        ee_dist = jp.linalg.norm(current_ee - current_ref_ee)        
+        # jax.debug.print("end diff result ref:{}",current_ref_ee)        
+        #ee_dist = jp.linalg.norm(current_ee - current_ref_ee)        
         #jax.debug.print("end dis:{}",ee_dist)
-        
-        ee_reward = jp.exp(-self.w_efector * (ee_dist**2))
+        #ee_reward = jp.exp(-self.w_efector * (ee_dist**2))
         #jax.debug.print("ee_reward:{}",ee_reward)
-        
+        ee_dist_squared = jp.sum(jp.linalg.norm(current_ee - current_ref_ee, axis=1) ** 2)
+        ee_reward = jp.exp(-self.w_efector * ee_dist_squared)
         return ee_reward
         
     
@@ -312,9 +330,14 @@ class HumanoidPPOENV(HumanoidTemplate):
         # jax.debug.print("ang diff result local:{}",local_ang)
         # jax.debug.print("ang diff result ref:{}",ref_local_ang)
         
-        ang_dist = jp.linalg.norm(local_ang - ref_local_ang)
+        # ang_dist = jp.linalg.norm(local_ang - ref_local_ang)
         
-        ang_reward = jp.exp(-self.w_angular * (ang_dist**2))
+        # ang_reward = jp.exp(-self.w_angular * (ang_dist**2))
+        
+        
+        
+        ang_dist_squared = jp.sum(jp.linalg.norm(local_ang - ref_local_ang, axis=1) ** 2)
+        ang_reward = jp.exp(-self.w_angular * ang_dist_squared)
         return ang_reward
         
     
@@ -349,12 +372,18 @@ class HumanoidPPOENV(HumanoidTemplate):
         current_rot6D = quaternion_to_rotation_6d(local_rot)
         ref_rot6D = quaternion_to_rotation_6d(current_state_ref)
         
-        rot_dist = jp.linalg.norm(current_rot6D - ref_rot6D)
+        #rot_dist = jp.linalg.norm(current_rot6D - ref_rot6D)
         
-        quat_reward = jp.exp(-self.w_pose * (rot_dist**2))
+        #quat_reward = jp.exp(-self.w_pose * (rot_dist**2))
+        #quat_reward = jp.exp(-self.w_pose * (rot_dist**2))
 
         
         #jax.debug.print("quat diff result:{}",quat_reward)
+        
+        rot_dist= jp.sum(jp.linalg.norm(current_rot6D - ref_rot6D , axis=1) ** 2)
+        quat_reward = jp.exp(-self.w_pose * rot_dist)
+        
+        
         
         return quat_reward
     
@@ -365,40 +394,6 @@ class HumanoidPPOENV(HumanoidTemplate):
         return data.subtree_com[1]
     
     
-    def _get_obs(self, data: base.State, step_idx: jp.ndarray)-> jp.ndarray:
-          
-        current_step_inx =  jp.asarray(step_idx, dtype=jp.int64)
-        
-        
-        #relative_pos , local_rotations,local_vel,local_ang = self.convert_local(data)
-        relative_pos , local_rotations,local_vel,local_ang = self.convertLocaDiff(data)
-        
-        relative_pos = relative_pos[1:]
-        #q_relative_pos,q_local_rotations, q_local_vel, q_local_ang = self.convertLocaDiff(data)
-        
-        local_rotations = local_rotations.at[0].set(data.x.rot[0])
-        
-        
-        #convert quat to 6d root
-        rot_6D= quaternion_to_rotation_6d(local_rotations)
-        
-        # jax.debug.print("pos mine{}",relative_pos)
-        # jax.debug.print("rot mine {}", local_rotations)
-        # jax.debug.print("vel mine{}", local_vel)
-        # jax.debug.print("ang mine{}", local_ang)
-        # jax.debug.print("pos q{}",q_relative_pos)
-        # jax.debug.print("rot q {}", q_local_rotations)
-        # jax.debug.print("vel q{}", q_local_vel)
-        # jax.debug.print("ang q{}", q_local_ang)
-        #phi
-        phi = (current_step_inx % self.cycle_len) / self.cycle_len
-        
-        phi = jp.asarray(phi)
-        
-        
-        #jax.debug.print("phi{}", phi)
-        return jp.concatenate([relative_pos.ravel(),rot_6D.ravel(),
-                               local_vel.ravel(),local_ang.ravel(),phi[None]])
 
 
     

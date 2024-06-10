@@ -1,0 +1,36 @@
+num_envs: 256
+num_eval_envs: 32
+lr: 0.0003
+max_it: 1000
+max_grad_norm: 0.4
+seed: 0
+system_config: humanoid
+demo_replay_mode: threshold
+threshold: 0.4
+normalize_observations: True
+cycle_len: 195
+ep_len: 39
+ep_len_eval: 54
+use_lr_scheduler: True
+reward_scaling: 0.02
+rot_weight: 0.5
+vel_weight: 0.01
+ang_weight: 0.01
+
+deep_mimic_reward_weights:
+  w_p: 0.3
+  w_v: 0.1
+  w_e: 0.5
+  w_c: 0.1
+
+deep_mimic_weights_factors:
+  w_pose: 2
+  w_angular: 0.005
+  w_efector: 5
+  w_com: 100
+
+model: models/final_humanoid2.xml
+
+
+#ref: motions/humanoid3d_walk.txt
+ref: motions/humanoid3d_walk_duplicated.txt

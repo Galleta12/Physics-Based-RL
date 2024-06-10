@@ -58,7 +58,6 @@ class HumanoidEvalTemplate(HumanoidTemplate):
             policy=jax.checkpoint_policies.dots_with_no_batch_dims_saveable)
     
 
-    #
     def step(self, state: State, action: jp.ndarray) -> State:
         
         #perform the action of the policy
@@ -67,50 +66,46 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         #current qpos and qvel for the torque    
         qpos = state.pipeline_state.q
         qvel = state.pipeline_state.qd
-
         timeEnv = state.pipeline_state.time
-
         #deltatime of physics
         dt = self.sys.opt.timestep
         
         action = jp.clip(action, -1, 1) # Raw action  
         #target_angles = action * jp.pi * 1.2
         #exclude the root
-        target_angles = self._inital_pos[7:] +(action * jp.pi * 1.2)
+        target_angles = state.info['default_pos'][7:] +(action * jp.pi * 1.2)
+        #target_angles = (action * jp.pi * 1.2)
         #target_angles = action 
         
-        # torque = self.pd_function(target_angles,self.sys,state,qpos,qvel,
-        #                          self.kp_gains,self.kd_gains,timeEnv,dt) 
+        torque = self.pd_function(target_angles,self.sys,state,qpos,qvel,
+                                 self.kp_gains,self.kd_gains,timeEnv,dt) 
         
-        #data = self.pipeline_step(state.pipeline_state,torque)
-        data = self.pipeline_step(state.pipeline_state,target_angles)
+        data = self.pipeline_step(state.pipeline_state,torque)
+        #data = self.pipeline_step(state.pipeline_state,target_angles)
                 
         index_new =jp.array(state.info['steps']%self.cycle_len, int)
-        
-        #jax.debug.print("new idx: {}",index_new)
-        
-        
+                
         
         initial_idx = state.metrics['step_index'] +1.0
         current_step_inx =  jp.asarray(initial_idx%self.cycle_len, dtype=jp.float64)
 
-        
         current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
 
-
-        
         
         fall=0.0
         fall = jp.where(data.qpos[2] < 0.5, 1.0, fall)
         fall = jp.where(data.qpos[2] > 1.7, 1.0, fall)
         
-        #get the observations
-        obs = self._get_obs(data, current_step_inx)
-        
         reward, reward_tuple = self.compute_rewards_diffmimic(data,current_state_ref)
         
+        #get the observations
         #state mangement
+        state.info['last_action'] = action
+        state.info['kinematic_ref'] = current_state_ref.qpos
         state.info['reward_tuple'] = reward_tuple
+        
+        obs = self._get_obs(data, current_step_inx,state.info)
+        
         
         for k in state.info['reward_tuple'].keys():
             state.metrics[k] = state.info['reward_tuple'][k]
@@ -138,57 +133,55 @@ class HumanoidEvalTemplate(HumanoidTemplate):
     #class for testing step_custom where we just check the pd controller
     def step_custom(self, state: State, action: jp.ndarray) -> State:
         
-        index_new =jp.array(state.info['steps']%self.cycle_len, int)
-        #jax.debug.print("new idx: {}",index_new)
-        
         initial_idx = state.metrics['step_index'] +1.0
         current_step_inx =  jp.asarray(initial_idx%self.cycle_len, dtype=jp.float64)
-
-        
         current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
-
-
-        #updates in the info
-       
-        #current qpos and qvel for the torque    
+           
         qpos = state.pipeline_state.q
         qvel = state.pipeline_state.qd
-
         timeEnv = state.pipeline_state.time
-        
         #deltatime of physics
         dt = self.sys.opt.timestep
         
-        #jax.debug.print("time{}",timeEnv)
-        
+        #target_angles = action * jp.pi * 1.2
+        #exclude the root
+        target_angles = state.info['default_pos'][7:] +(current_state_ref.qpos[7:]* jp.pi * 1.2)
+        #target_angles = action 
         
         torque = self.pd_function(current_state_ref.qpos[7:],self.sys,state,qpos,qvel,
                                  self.kp_gains,self.kd_gains,timeEnv,dt) 
+        
         data = self.pipeline_step(state.pipeline_state,torque)
+        #data = self.pipeline_step(state.pipeline_state,target_angles)
+                
+        index_new =jp.array(state.info['steps']%self.cycle_len, int)
+                
         
         fall=0.0
         fall = jp.where(data.qpos[2] < 0.5, 1.0, fall)
         fall = jp.where(data.qpos[2] > 1.7, 1.0, fall)
-        #jax.debug.print("fall{}",fall)
-        
-        
-        #get the observations
-        obs = self._get_obs(data, current_step_inx)
         
         reward, reward_tuple = self.compute_rewards_diffmimic(data,current_state_ref)
         
-          
+        #get the observations
         #state mangement
+        state.info['last_action'] = action
+        state.info['kinematic_ref'] = current_state_ref.qpos
         state.info['reward_tuple'] = reward_tuple
+        
+        obs = self._get_obs(data, current_step_inx,state.info)
+        
         
         for k in state.info['reward_tuple'].keys():
             state.metrics[k] = state.info['reward_tuple'][k]
         
         
+        
         global_pos_state = data.x.pos
         global_pos_ref = current_state_ref.x.pos
         pose_error=loss_l2_relpos(global_pos_state, global_pos_ref)
-         
+        
+        
         state.metrics.update(
             step_index=current_step_inx,
             pose_error=pose_error,

@@ -36,13 +36,15 @@ from .losses import *
 current_dir = os.path.dirname(os.path.realpath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
-
+from jax.flatten_util import ravel_pytree
 
 from some_math.rotation6D import quaternion_to_rotation_6d
 from some_math.math_utils_jax import *
 from utils.SimpleConverter import SimpleConverter
 from utils.util_data import generate_kp_kd_gains
 import some_math.quaternion_diff as diff_quat
+
+
 def cos_wave(t, step_period, scale):
     _cos_wave = -jp.cos(((2*jp.pi)/step_period)*t)
     return _cos_wave * (scale/2) + (scale/2)
@@ -94,7 +96,6 @@ def make_kinematic_ref(sinusoid, step_k, scale=0.3, dt=1/50):
     step_cycle = jp.concatenate([block1, block2], axis=0)
     return step_cycle
 
-
 def get_config():
   def get_default_rewards_config():
     default_config = config_dict.ConfigDict(
@@ -118,6 +119,7 @@ def get_config():
 class HumanoidAPGTest(PipelineEnv):
     def __init__(
       self,
+      termination_height: float=0.25,
       **kwargs,
     ):
         
@@ -127,203 +129,163 @@ class HumanoidAPGTest(PipelineEnv):
         
         
         path = epath.Path(model_path).as_posix()
-        
-        # physics_steps_per_control_step = 10
-        # kwargs['n_frames'] = kwargs.get(
-        # 'n_frames', physics_steps_per_control_step)
-
         mj_model = mujoco.MjModel.from_xml_path(path)
         
-        sys = mjcf.load_model(mj_model)
-
+        # mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
+        # mj_model.opt.iterations = 6
+        # mj_model.opt.ls_iterations = 6
+            
+        physics_steps_per_control_step = 10
        
+        kp = 230
+        mj_model.actuator_gainprm[:, 0] = kp
+        mj_model.actuator_biasprm[:, 1] = -kp 
+        sys = mjcf.load_model(mj_model)
+        
+        
         self._dt = 1/60
         optimal_timestep = self._dt/5  
         
         sys = sys.tree_replace({'opt.timestep': 0.002})
         
-        n_frames = kwargs.pop('n_frames', int(self._dt / 0.002))
+        #n_frames = kwargs.pop('n_frames', int(self._dt / 0.002))
+        n_frames = kwargs.pop('n_frames',  physics_steps_per_control_step)
         
-        super().__init__(sys, backend='mjx', n_frames=n_frames)
+        super().__init__(sys=sys, **kwargs)    
+    
+        self.termination_height = termination_height
         
-           
-        #this is to keep separate the sys of the agent
-        #and the sys for the reference
-        self.sys_reference = deepcopy(self.sys)
-        #data for the reference
-        self.reference_trajectory_qpos = jp.array(reference_data.data_pos)
-        self.reference_trajectory_qvel = jp.array(reference_data.data_vel)
-        print("qpos init",self.reference_trajectory_qpos.shape)
-        print("qvel init",self.reference_trajectory_qvel.shape)
+        #self._init_q = mj_model.keyframe('standing').qpos
         
+        self.err_threshold = 0.4 # diffmimic; value from paper.
         
-        self.kp_gains,self.kd_gains = generate_kp_kd_gains()
-        #this it is the lenght, of the trajectory
-        self.rollout_lenght = jp.array(self.reference_trajectory_qpos.shape[0])
+        #self._default_ap_pose = mj_model.keyframe('standing').qpos[7:]
+        self.reward_config = get_config()
+
+        #self.action_loc = self._default_ap_pose
+        #self.action_scale = jp.array([0.2, 0.8, 0.8] * 4)
         
-        self.rot_weight =  args.rot_weight
-        self.vel_weight =  args.vel_weight
-        self.ang_weight =  args.ang_weight
-        self.reward_scaling= args.reward_scaling
-        
-        #for now it will be the same size
-        self.cycle_len = jp.array(self.reference_trajectory_qpos.shape[0])  
+        self.feet_inds = jp.array([21,28,35,42]) # LF, RF, LH, RH
 
         
+        data_pos = jp.asarray(reference_data.data_pos)
+        data_vel= jp.asarray(reference_data.data_vel)
+        self.kinematic_ref_qpos = jp.asarray(data_pos[:,:28])
+        self.kinematic_ref_qvel = jp.asarray(data_vel[:,:27])
+        # self.kinematic_ref_qpos = jp.asarray(data_pos[:,:19])
+        # self.kinematic_ref_qvel = jp.asarray(data_vel[:,:18])
         
-        # self._init_q = mj_model.keyframe('standing').qpos
-         
-        # self._default_ap_pose = mj_model.keyframe('standing').qpos[7:]
-        # # Expand to entire state space.
-
-
-        # kinematic_ref_qpos = make_kinematic_ref(
-        # cos_wave, 25, scale=0.3, dt=self.dt)
-        # kinematic_ref_qvel = make_kinematic_ref(
-        # dcos_wave, 25, scale=0.3, dt=self.dt)
-        # self.l_cycle = jp.array(kinematic_ref_qpos.shape[0])
-
-        # kinematic_ref_qpos += self._default_ap_pose
-        # ref_qs = np.tile(self._init_q.reshape(1, 19), (self.l_cycle, 1))
-        # ref_qs[:, 7:] = kinematic_ref_qpos
-        # self.kinematic_ref_qpos = jp.array(ref_qs)
+        self.l_cycle = jp.array(self.kinematic_ref_qpos.shape[0])
         
-        # ref_qvels = np.zeros((self.l_cycle, 18))
-        # ref_qvels[:, 6:] = kinematic_ref_qvel
-        # self.kinematic_ref_qvel = jp.array(ref_qvels)
+        # Expand to entire state space.
 
-
-        # self.kinematic_ref_qpos = jp.zeros((self.cycle_len, 19))
         
 
-        # self.kinematic_ref_qvel = jp.zeros((self.cycle_len, 18))
-            
-        
         # Can decrease jit time and training wall-clock time significantly.
         self.pipeline_step = jax.checkpoint(self.pipeline_step, 
         policy=jax.checkpoint_policies.dots_with_no_batch_dims_saveable)
-            
         
-   
+    
+    #get a reference state from the referece trajectory
+    #this is used on the reset only on the reset
+    def get_reference_state(self,step_index):
+        
+        step_index =  jp.asarray(step_index, dtype=jp.int64)
+        ref_qp = self.kinematic_ref_qpos[step_index]
+        ref_qv = self.kinematic_ref_qvel[step_index]
+        #now I will return a state depending on the index and the reference trajectory
+        return self.pipeline_init(ref_qp,ref_qv)
+    
     def reset(self, rng: jax.Array) -> State:
         # Deterministic init
+
+        #qpos = jp.array(self._init_q)
+        #qvel = jp.zeros(34)
         
-        # qpos = self.sys.qpos0
-        # qvel = jp.zeros(18)
-        
-        # data = self.pipeline_init(qpos, qvel)
+        #data = self.pipeline_init(qpos, qvel)
         data = self.get_reference_state(0)
-        # # Position onto ground
+
+        # Position onto ground
         # pen = jp.min(data.contact.dist)
         # qpos = qpos.at[2].set(qpos[2] - pen)
         # data = self.pipeline_init(qpos, qvel)
+
         state_info = {
             'rng': rng,
             'steps': 0.0,
             'reward_tuple': {
-                'reference_position': 0.0,
-                'reference_rotation': 0.0,
-                'reference_velocity': 0.0,
-                'reference_angular': 0.0
+                'reference_tracking': 0.0,
+                'min_reference_tracking': 0.0,
             },
-           'index_step':0.0
+            'last_action': jp.zeros(21), # from MJX tutorial.
+            'kinematic_ref': jp.zeros(28),
         }
 
         x, xd = data.x, data.xd
-        obs = self._get_obs(data,state_info)
+        obs = self._get_obs(data.qpos, x, xd, state_info)
         reward, done = jp.zeros(2)
         metrics = {}
         for k in state_info['reward_tuple']:
             metrics[k] = state_info['reward_tuple'][k]
         state = State(data, obs, reward, done, metrics, state_info)
         return jax.lax.stop_gradient(state)
-    
-    
-    #get a reference state from the referece trajectory
-    #this is used on the reset only on the reset
-    def get_reference_state(self,step_index):
-        ref_qp = self.reference_trajectory_qpos[step_index]
-        ref_qv = self.reference_trajectory_qvel[step_index]
-        
-        # jax.debug.print("ref_qp{}", ref_qp.shape)
-        # jax.debug.print("ref_qv{}", ref_qv.shape)
-        
-        #now I will return a state depending on the index and the reference trajectory
-        return self.pipeline_init(ref_qp,ref_qv)
-    
-    
+  
     def step(self, state: State, action: jax.Array) -> State:
-        
-            
+        action = jp.clip(action, -1, 1) # Raw action
+
         action = action
-        
-        #jax.debug.print("action shape:{}",action.shape)
-        
-        
+
         data = self.pipeline_step(state.pipeline_state, action)
         
-              
         # jax.debug.print('steps cycle: {}',state.info['steps']%self.l_cycle)
         # jax.debug.print('steps info: {}',state.info['steps'])
-        current_idx = jp.array(state.info['index_step'] + 1,int)
-        #updated in the info
-        state.info['index_step'] =  state.info['index_step'] + 1.0
         
-        # ref_qpos = self.reference_trajectory_qpos[current_idx]
-        # ref_qvel = self.reference_trajectory_qvel[current_idx]
-  
-        # ref_qpos = self.kinematic_ref_qpos[jp.array(state.info['steps']%self.l_cycle, int)]
-        # ref_qvel = self.kinematic_ref_qvel[jp.array(state.info['steps']%self.l_cycle, int)]
-    
-  
-        # ref_qpos = self.kinematic_ref_qpos[jp.array(state.info['steps']%self.cycle_len, int)]
-        # ref_qvel = self.kinematic_ref_qvel[jp.array(state.info['steps']%self.cycle_len, int)]
-    
+        
+        ref_qpos = self.kinematic_ref_qpos[jp.array(state.info['steps']%self.l_cycle, int)]
+        ref_qvel = self.kinematic_ref_qvel[jp.array(state.info['steps']%self.l_cycle, int)]
         
         # Calculate maximal coordinates
-        # ref_data = data.replace(qpos=ref_qpos, qvel=ref_qvel)
-        # ref_data = mjx.forward(self.sys, ref_data)
-        ref_x, ref_xd = data.x, data.xd
+        ref_data = data.replace(qpos=ref_qpos, qvel=ref_qvel)
+        ref_data = mjx.forward(self.sys, ref_data)
+        ref_x, ref_xd = ref_data.x, ref_data.xd
 
-       
+        state.info['kinematic_ref'] = ref_qpos
 
         # observation data
         x, xd = data.x, data.xd
-        obs = self._get_obs(data, state.info)
+        obs = self._get_obs(data.qpos, x, xd, state.info)
 
         # Terminate if flipped over or fallen down.
         done = 0.0
-        done = jp.where(x.pos[0, 2] < 0.25, 1.0, done)
-        # up = jp.array([0.0, 0.0, 1.0])
-        # done = jp.where(jp.dot(math.rotate(up, x.rot[0]), up) < 0, 1.0, done)
+        done = jp.where(x.pos[0, 2] < self.termination_height, 1.0, done)
+        up = jp.array([0.0, 0.0, 1.0])
+        done = jp.where(jp.dot(math.rotate(up, x.rot[0]), up) < 0, 1.0, done)
 
-
+        # reward
         reward_tuple = {
-        'reference_position': (
-          self._reward_position(x,ref_x)
+            'reference_tracking': (
+            self._reward_reference_tracking(x, xd, ref_x, ref_xd)
+            * self.reward_config.rewards.scales.reference_tracking
             ),
-        'reference_rotation': (
-            self._reward_rotation(x,ref_x) * self.rot_weight
-            ),
-        'reference_velocity': (
-            self._reward_velocity(xd,ref_xd) * self.vel_weight
-            ),
-        'reference_angular': (
-            self._reward_angular(xd,ref_xd) * self.ang_weight
-            ),
-        
+            'min_reference_tracking': (
+            self._reward_min_reference_tracking(ref_qpos, ref_qvel, state)
+            * self.reward_config.rewards.scales.min_reference_tracking
+            )    
         }
         
+        reward = sum(reward_tuple.values())
+        reward = sum(reward_tuple.values())
+        reward = jp.nan_to_num(reward)
+        obs = jp.nan_to_num(obs)
+        flattened_vals, _ = ravel_pytree(data)
+        num_nans = jp.sum(jp.isnan(flattened_vals))
+        done = jp.where(num_nans > 0, 1.0, done)
         
         
-        #reward = sum(reward_tuple.values())
-        reward = -1* sum(reward_tuple.values()) * self.reward_scaling
-        jax.debug.print("total rewards:{}", reward)
-
-
         # state management
         state.info['reward_tuple'] = reward_tuple
-       
+        state.info['last_action'] = action # used for observation. 
+
         for k in state.info['reward_tuple'].keys():
             state.metrics[k] = state.info['reward_tuple'][k]
 
@@ -331,63 +293,45 @@ class HumanoidAPGTest(PipelineEnv):
             pipeline_state=data, obs=obs, reward=reward,
             done=done)
         
+        #### Reset state to reference if it gets too far
+        error = (((x.pos - ref_x.pos) ** 2).sum(-1)**0.5).mean()
+        to_reference = jp.where(error > self.err_threshold, 1.0, 0.0)
 
-        return state
-    
-    def _get_obs(self, data: base.State, state_info: Dict[str, Any]) -> jax.Array:
+        to_reference = jp.array(to_reference, dtype=int) # keeps output types same as input. 
+        ref_data = self.mjx_to_brax(ref_data)
 
+        data = jax.tree_util.tree_map(lambda x, y: 
+                                    jp.array((1-to_reference)*x + to_reference*y, x.dtype), data, ref_data)
         
-        current_idx = jp.array(state_info['index_step'],int)
+        x, xd = data.x, data.xd # Data may have changed.
+        obs = self._get_obs(data.qpos, x, xd, state.info)
         
-        relative_pos , local_rotations,local_vel,local_ang = self.convert_local(data)
-        #relative_pos , local_rotations,local_vel,local_ang = self.convertLocaDiff(data)
-        
-        relative_pos = relative_pos[1:]
-        #q_relative_pos,q_local_rotations, q_local_vel, q_local_ang = self.convertLocaDiff(data)
-        
-        #convert quat to 6d root
-        rot_6D= quaternion_to_rotation_6d(local_rotations)
+        return state.replace(pipeline_state=data, obs=obs)
+    
+    def _get_obs(self, qpos: jax.Array, x: Transform, xd: Motion,
+               state_info: Dict[str, Any]) -> jax.Array:
 
-        phi = (current_idx % self.cycle_len) / self.cycle_len
+        inv_base_orientation = math.quat_inv(x.rot[0])
+        local_rpyrate = math.rotate(xd.ang[0], inv_base_orientation)
 
-        phi = jp.array(phi)
+        obs_list = []
+        # yaw rate
+        obs_list.append(jp.array([local_rpyrate[2]]) * 0.25)
+        # projected gravity
+        obs_list.append(
+            math.rotate(jp.array([0.0, 0.0, -1.0]), inv_base_orientation))
+        # motor angles
+        angles = qpos[7:19]
+        obs_list.append(angles)
+        # last action
+        obs_list.append(state_info['last_action'])
+        # kinematic reference
+        kin_ref = self.kinematic_ref_qpos[jp.array(state_info['steps']%self.l_cycle, int)]
+        obs_list.append(kin_ref[7:]) # First 7 indicies are fixed
 
-        return jp.concatenate([relative_pos.ravel(),rot_6D.ravel(),
-                               local_vel.ravel(),local_ang.ravel(),phi[None]])
-  
-    
-    
-    
-    
-      
-    def convert_local(self,data: base.State):
-        
-        root_pos = data.x.pos[0]
-        root_quat_inv =  math.quat_inv(data.x.rot[0])
-        
-        #inverted_root= math.quat_mul(root_quat_inv,data.x.rot[0])
-        
-        #apply root-relative transformation
-        def transform_to_root_local(pos, rot,vel, ang):
-            local_pos = pos - root_pos
-            local_rot = math.quat_mul(root_quat_inv, rot)
-            local_vel = math.rotate(vel,math.quat_inv(data.x.rot[0]))
-            local_ang = math.rotate(ang,math.quat_inv(data.x.rot[0]))
-            
-            return local_pos, local_rot, local_vel,local_ang
-        #Applying the transformation to all positions and orientations
-        #this is relative to the root
-        local_positions, local_rotations,local_vel,local_ang = jax.vmap(transform_to_root_local)(data.x.pos, data.x.rot,data.xd.vel,data.xd.ang)
-        #get rid of the zero  root pos
-        #relative_pos = local_positions[1:]
-        
-        return local_positions,local_rotations,local_vel,local_ang
-    
-    
-    
-  
-  
-  
+        obs = jp.clip(jp.concatenate(obs_list), -100.0, 100.0)
+
+        return obs
   
     def mjx_to_brax(self, data):
         """ 
@@ -402,42 +346,8 @@ class HumanoidAPGTest(PipelineEnv):
         data = _reformat_contact(self.sys, data)
         return data.replace(q=q, qd=qd, x=x, xd=xd)
 
-    def _reward_position(self,x,ref_x):
-        
-        f = lambda x, y: ((x - y) ** 2).sum(-1).mean()
-        _mse_pos = f(x.pos, ref_x.pos)
-        jax.debug.print("_mse_pos:{}", _mse_pos)
-        
-        return _mse_pos
-    def _reward_rotation(self,x,ref_x):
-        
-        f = lambda x, y: ((x - y) ** 2).sum(-1).mean()
-        _mse_rot = f(quaternion_to_rotation_6d(x.rot),
-                    quaternion_to_rotation_6d(ref_x.rot))
-        
-        jax.debug.print("_mse_rot:{}", _mse_rot)
-        
-        return _mse_rot
-    
-    def _reward_velocity(self,xd,ref_xd):
-        
-        f = lambda x, y: ((x - y) ** 2).sum(-1).mean()
-        _mse_vel = f(xd.vel, ref_xd.vel)
-        jax.debug.print("_mse_vel:{}", _mse_vel)
-        
-        
-        return _mse_vel 
-    def _reward_angular(self,xd,ref_xd):
-        
-        f = lambda x, y: ((x - y) ** 2).sum(-1).mean()
-        _mse_ang = f(xd.ang, ref_xd.ang)
-        
-        jax.debug.print("_mse_ang:{}", _mse_ang)
-        
-        return _mse_ang
-    
-    
-  # ------------ reward functions----------------
+
+    # ------------ reward functions----------------
     def _reward_reference_tracking(self, x, xd, ref_x, ref_xd):
         """
         Rewards based on inertial-frame body positions.
@@ -458,3 +368,20 @@ class HumanoidAPGTest(PipelineEnv):
         + 0.01 * _mse_vel  \
         + 0.001 * _mse_ang
 
+    def _reward_min_reference_tracking(self, ref_qpos, ref_qvel, state):
+        """ 
+        Using minimal coordinates. Improves accuracy of joint angle tracking.
+        """
+        pos = jp.concatenate([
+        state.pipeline_state.qpos[:3],
+        state.pipeline_state.qpos[7:]])
+        pos_targ = jp.concatenate([
+        ref_qpos[:3],
+        ref_qpos[7:]])
+        pos_err = jp.linalg.norm(pos_targ - pos)
+        vel_err = jp.linalg.norm(state.pipeline_state.qvel- ref_qvel)
+
+        return pos_err + vel_err
+
+    def _reward_feet_height(self, feet_pos, feet_pos_ref):
+        return jp.sum(jp.abs(feet_pos - feet_pos_ref)) # try to dr

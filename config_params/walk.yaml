@@ -29,6 +29,7 @@ deep_mimic_weights_factors:
   w_efector: 5
   w_com: 100
 
+model: models/final_humanoid.xml
 
 
 #ref: motions/humanoid3d_walk.txt
