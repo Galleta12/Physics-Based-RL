@@ -170,8 +170,8 @@ class HumanoidAPGTest(PipelineEnv):
         
         data_pos = jp.asarray(reference_data.data_pos)
         data_vel= jp.asarray(reference_data.data_vel)
-        self.kinematic_ref_qpos = jp.asarray(data_pos[:,:28])
-        self.kinematic_ref_qvel = jp.asarray(data_vel[:,:27])
+        self.kinematic_ref_qpos = jp.asarray(data_pos)
+        self.kinematic_ref_qvel = jp.asarray(data_vel)
         # self.kinematic_ref_qpos = jp.asarray(data_pos[:,:19])
         # self.kinematic_ref_qvel = jp.asarray(data_vel[:,:18])
         
@@ -217,8 +217,8 @@ class HumanoidAPGTest(PipelineEnv):
                 'reference_tracking': 0.0,
                 'min_reference_tracking': 0.0,
             },
-            'last_action': jp.zeros(21), # from MJX tutorial.
-            'kinematic_ref': jp.zeros(28),
+            'last_action': jp.zeros(28), # from MJX tutorial.
+            'kinematic_ref': jp.zeros(35),
         }
 
         x, xd = data.x, data.xd
