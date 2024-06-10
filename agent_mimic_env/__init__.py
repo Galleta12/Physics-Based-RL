@@ -43,8 +43,8 @@ def register_mimic_env(args) -> Tuple[HumanoidTemplate,HumanoidEvalTemplate,Huma
         
     trajectory = SimpleConverter(args.ref)
     trajectory.load_mocap()
-    #model_path = 'models/final_humanoid.xml'
-    model_path = args.model
+    model_path = 'models/other_humanoid2.xml'
+    #model_path = args.model
     
         
     envs.register_environment('humanoidEnvReplay',HumanoidTemplate)
