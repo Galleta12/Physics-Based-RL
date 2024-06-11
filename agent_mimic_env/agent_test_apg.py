@@ -99,7 +99,9 @@ class HumanoidAPGTest(PipelineEnv):
         
         super().__init__(sys=sys, **kwargs)    
     
-        
+        kp_gains,kd_gains = generate_kp_kd_gains()
+        self.kp_gains = jp.asarray(kp_gains)
+        self.kd_gains = jp.asarray(kd_gains)
         #and the sys for the reference
         self.sys_reference = deepcopy(self.sys)
         self.termination_height = termination_height
@@ -117,13 +119,18 @@ class HumanoidAPGTest(PipelineEnv):
         
         
         self.cycle_len = jp.array(self.kinematic_ref_qpos.shape[0])
-        
+        self.rot_weight =  args.rot_weight
+        self.vel_weight =  args.vel_weight
+        self.ang_weight =  args.ang_weight
+        self.reward_scaling= args.reward_scaling
 
-    
         # Can decrease jit time and training wall-clock time significantly.
         self.pipeline_step = jax.checkpoint(self.pipeline_step, 
         policy=jax.checkpoint_policies.dots_with_no_batch_dims_saveable)
-        
+    
+    
+    def set_pd_callback(self,pd_control):
+        self.pd_function = pd_control  
     
     #get a reference state from the referece trajectory
     #this is used on the reset only on the reset
@@ -171,8 +178,10 @@ class HumanoidAPGTest(PipelineEnv):
             'rng': rng,
             'steps': 0.0,
             'reward_tuple': {
-               'reference_tracking': 0.0,
-               'min_reference_tracking': 0.0,
+                'reference_position': 0.0,
+                'reference_rotation': 0.0,
+                'reference_velocity': 0.0,
+                'reference_angular': 0.0,
             },
             'last_action':jp.zeros(28),
             'kinematic_ref': ref_qp,     
@@ -190,21 +199,34 @@ class HumanoidAPGTest(PipelineEnv):
         return jax.lax.stop_gradient(state)
   
     def step(self, state: State, action: jax.Array) -> State:
+        
+        
+        qpos = state.pipeline_state.q
+        qvel = state.pipeline_state.qd
+        timeEnv = state.pipeline_state.time
+        #deltatime of physics
+        dt = self.sys.opt.timestep
+        
         action = jp.clip(action, -1, 1) # Raw action
 
-        action = state.info['default_pos'][7:] +(action * jp.pi * 1.2)
+        target_angles = state.info['default_pos'][7:] +(action * jp.pi * 1.2)
 
-        data = self.pipeline_step(state.pipeline_state, action)
+        #target_angles=action * jp.pi * 1.2
+        
+        #torque = self.pd_function(target_angles,self.sys,state,qpos,qvel,
+        #                         self.kp_gains,self.kd_gains,timeEnv,dt) 
+
+
+
+        data = self.pipeline_step(state.pipeline_state, target_angles)
         
         initial_idx = state.metrics['step_index'] +1.0
         current_step_inx =  jp.asarray(initial_idx%self.cycle_len, dtype=jp.float64)
-        
         ref_qpos = self.kinematic_ref_qpos[jp.array(current_step_inx, int)]
         ref_qvel = self.kinematic_ref_qvel[jp.array(current_step_inx, int)]
-        
         ref_data =self._pipeline.init(self.sys_reference, ref_qpos, ref_qvel, self._debug)
         
-        # Calculate maximal coordinates
+        #Calculate maximal coordinates #when I use this I get nan
         # ref_data = data.replace(qpos=ref_qpos, qvel=ref_qvel)
         # ref_data = mjx.forward(self.sys, ref_data)
         ref_x, ref_xd = ref_data.x, ref_data.xd
@@ -221,24 +243,15 @@ class HumanoidAPGTest(PipelineEnv):
        
 
         # reward
-        reward_tuple = {
-            'reference_tracking': (
-            self._reward_reference_tracking(x, xd, ref_x, ref_xd)
-            * self.reward_config.rewards.scales.reference_tracking
-            ),
-            'min_reference_tracking': (
-            self._reward_min_reference_tracking(ref_qpos, ref_qvel, state)
-            * self.reward_config.rewards.scales.min_reference_tracking
-            )    
-        }
+        reward, reward_tuple = self.compute_rewards_diffmimic(data,ref_data)
         
        
-        reward = sum(reward_tuple.values())
-        reward = jp.nan_to_num(reward)
-        obs = jp.nan_to_num(obs)
-        flattened_vals, _ = ravel_pytree(data)
-        num_nans = jp.sum(jp.isnan(flattened_vals))
-        done = jp.where(num_nans > 0, 1.0, done)
+      
+        # reward = jp.nan_to_num(reward)
+        # obs = jp.nan_to_num(obs)
+        # flattened_vals, _ = ravel_pytree(data)
+        # num_nans = jp.sum(jp.isnan(flattened_vals))
+        # done = jp.where(num_nans > 0, 1.0, done)
         
         
         # state management
@@ -301,6 +314,20 @@ class HumanoidAPGTest(PipelineEnv):
         return data.replace(q=q, qd=qd, x=x, xd=xd)
 
 
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     # ------------ reward functions----------------
     def _reward_reference_tracking(self, x, xd, ref_x, ref_xd):
         """
@@ -367,4 +394,51 @@ class HumanoidAPGTest(PipelineEnv):
         
         return relative_pos, normalized_rot, normalized_vel,normalized_ang
     
-    
+    def compute_rewards_diffmimic(self, data,current_state_ref):
+        
+        global_pos_state = data.x.pos
+        global_rot_state = quaternion_to_rotation_6d(data.x.rot)
+                
+        global_vel_state = data.xd.vel
+        global_ang_state = data.xd.ang
+        
+        
+        #now for the reference trajectory
+        global_pos_ref = current_state_ref.x.pos
+        #jax.debug.print("global pos ref: {}",global_pos_ref)
+        
+        global_rot_ref = quaternion_to_rotation_6d(current_state_ref.x.rot)
+              
+        global_vel_ref = current_state_ref.xd.vel
+        #jax.debug.print("global ref vel: {}",global_pos_ref)
+                
+        global_ang_ref = current_state_ref.xd.ang
+        #jax.debug.print("global ref ang: {}",global_pos_ref)
+         
+        # jax.debug.print("rot weight: {}",self.rot_weight)
+        # jax.debug.print("vel weight: {}",self.vel_weight)
+        # jax.debug.print("ang weight: {}",self.ang_weight)
+        # jax.debug.print("reward scaling: {}",self.reward_scaling)
+        
+        
+        reward_tuple = {
+            'reference_position': (
+                mse_pos(global_pos_state, global_pos_ref)
+            
+            ),
+            'reference_rotation': (
+                mse_rot(global_rot_state, global_rot_ref)*self.rot_weight 
+            ),
+            'reference_velocity': (
+                mse_vel(global_vel_state, global_vel_ref) *self.vel_weight
+            ),
+            'reference_angular': (
+                mse_ang(global_ang_state, global_ang_ref)*  self.ang_weight
+            )
+        }
+        
+        reward = -1*sum(reward_tuple.values()) * self.reward_scaling
+        
+        #reward = jp.where(reward < -1e-6 ,0.0,reward )
+        
+        return reward, reward_tuple
