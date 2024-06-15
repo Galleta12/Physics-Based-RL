@@ -213,18 +213,23 @@ class HumanoidAPGTest(PipelineEnv):
 
         #target_angles=action * jp.pi * 1.2
         
-        #torque = self.pd_function(target_angles,self.sys,state,qpos,qvel,
-        #                         self.kp_gains,self.kd_gains,timeEnv,dt) 
+        torque = self.pd_function(target_angles,self.sys,state,qpos,qvel,
+                                 self.kp_gains,self.kd_gains,timeEnv,dt) 
 
 
-
-        data = self.pipeline_step(state.pipeline_state, target_angles)
+        
+        data = self.pipeline_step(state.pipeline_state, torque)
         
         initial_idx = state.metrics['step_index'] +1.0
         current_step_inx =  jp.asarray(initial_idx%self.cycle_len, dtype=jp.float64)
         ref_qpos = self.kinematic_ref_qpos[jp.array(current_step_inx, int)]
         ref_qvel = self.kinematic_ref_qvel[jp.array(current_step_inx, int)]
         ref_data =self._pipeline.init(self.sys_reference, ref_qpos, ref_qvel, self._debug)
+        #data = self.pipeline_init(ref_data.qpos, ref_data.qvel)
+        
+        
+        
+        
         
         #Calculate maximal coordinates #when I use this I get nan
         # ref_data = data.replace(qpos=ref_qpos, qvel=ref_qvel)

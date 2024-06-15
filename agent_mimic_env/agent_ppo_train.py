@@ -1,8 +1,14 @@
 from datetime import datetime
 import functools
 from IPython.display import HTML
+import jax.numpy as jp
+import numpy as np
 import jax
-from jax import numpy as jp
+from jax import config # Analytical gradients work much better with double precision.
+config.update("jax_debug_nans", True)
+config.update("jax_enable_x64", True)
+config.update('jax_default_matmul_precision', jax.lax.Precision.HIGH)
+from brax import math
 import numpy as np
 from typing import Any, Dict, Sequence, Tuple, Union
 from brax import base
@@ -55,7 +61,7 @@ class HumanoidPPOENV(HumanoidTemplate):
                 policy=jax.checkpoint_policies.dots_with_no_batch_dims_saveable)
         args = kwargs.pop('args')
         
-        
+                
         self.w_p =  args.deep_mimic_reward_weights.w_p
         self.w_v =  args.deep_mimic_reward_weights.w_v
         self.w_e =  args.deep_mimic_reward_weights.w_e
@@ -66,10 +72,7 @@ class HumanoidPPOENV(HumanoidTemplate):
         self.w_efector =  args.deep_mimic_weights_factors.w_efector
         self.w_com= args.deep_mimic_weights_factors.w_com   
 
-        
-        
-        
-        
+           
     
     def reset(self, rng: jp.ndarray) -> State:
         
@@ -115,26 +118,22 @@ class HumanoidPPOENV(HumanoidTemplate):
         
         state = State(data, obs, reward, done, metrics,state_info)
            
-        return jax.lax.stop_gradient(state)
-        #return state
+        #return jax.lax.stop_gradient(state)
+        return state
     
   
     def step(self, state: State, action: jp.ndarray) -> State:
-        
-        #perform the action of the policy
-        #current qpos and qvel for the torque    
-        #perform the action of the policy
-        #current qpos and qvel for the torque    
+            
         qpos = state.pipeline_state.q
         qvel = state.pipeline_state.qd
         timeEnv = state.pipeline_state.time
         #deltatime of physics
         dt = self.sys.opt.timestep
         
-        action = jp.clip(action, -1, 1) # Raw action  
-        #target_angles = action * jp.pi * 1.2
+        #action = jp.clip(action, -1, 1) # Raw action  
+        target_angles = action * jp.pi * 1.2
         #exclude the root
-        target_angles = state.info['default_pos'][7:] +(action * jp.pi * 1.2)
+        #target_angles = state.info['default_pos'][7:] +(action * jp.pi * 1.2)
         #target_angles = action 
         
         torque = self.pd_function(target_angles,self.sys,state,qpos,qvel,
@@ -196,7 +195,7 @@ class HumanoidPPOENV(HumanoidTemplate):
         initial_idx = state.metrics['step_index'] +1.0
         current_step_inx =  jp.asarray(initial_idx%self.cycle_len, dtype=jp.float64)
         current_state_ref = self.set_ref_state_pipeline(current_step_inx,state.pipeline_state)
-           
+      
         qpos = state.pipeline_state.q
         qvel = state.pipeline_state.qd
         timeEnv = state.pipeline_state.time
@@ -214,9 +213,10 @@ class HumanoidPPOENV(HumanoidTemplate):
         data = self.pipeline_step(state.pipeline_state,torque)
         #data = self.pipeline_step(state.pipeline_state,target_angles)
         #data = self.pipeline_init(current_state_ref.qpos,current_state_ref.qvel)
-                
+        
         index_new =jp.array(state.info['steps']%self.cycle_len, int)
                 
+        
         
         fall=0.0
         fall = jp.where(data.qpos[2] < 0.5, 1.0, fall)
@@ -265,50 +265,75 @@ class HumanoidPPOENV(HumanoidTemplate):
         #ref_local_pos , ref_local_rotations,ref_local_vel,ref_local_ang = self.convert_local(current_state_ref)
         ref_local_pos , ref_local_rotations,ref_local_vel,ref_local_ang = self.convertLocaDiff(current_state_ref)
         
+        #jax.debug.print("this is the local ang curret:{}",local_ang)
+        #jax.debug.print("this is the local ang ref:{}",ref_local_ang)
+                
+        #jax.debug.print("this is the local ang rotation{}:",local_rotations)
+        #jax.debug.print("this is the local ang rotation{}:",ref_local_rotations)
+
+        
         
         #data for the end effector reward
         current_ee = data.geom_xpos[self.dict_ee]
         current_ref_ee = current_state_ref.geom_xpos[self.dict_ee]
         
-        # jax.debug.print('current',current_ee.shape)
-        # jax.debug.print('currentref',current_ref_ee.shape)
+        #jax.debug.print('current end{}',current_ee)
+        #jax.debug.print('currentref end{}',current_ref_ee)
         
         
         com_current,_,_,_ = self._com(data)
         ref_com,_,_,_ = self._com(current_state_ref)
         # com_current = self.get_com(data)
         # ref_com = self.get_com(current_state_ref)
+        #jax.debug.print('current com{}',com_current)
+        #jax.debug.print('current com{}',ref_com)
         
         reward_tuple = {
             'reference_quaternions': (
-                self.quat_diff(local_rotations,ref_local_rotations) * self.w_p 
-            
+                self.quat_diff(local_rotations,ref_local_rotations,
+                               data,current_state_ref)  
             ),
             'reference_angular': (
-                self.angular_diff(local_ang, ref_local_ang) * self.w_v 
+                self.angular_diff(local_ang, ref_local_ang)  
             ),
             'reference_end_effector': (
-                self.end_effector_diff(current_ee,current_ref_ee) * self.w_e
+                self.end_effector_diff(current_ee,current_ref_ee) 
             ),
             'reference_com': (
-                self.com_reward(com_current, ref_com) * self.w_c
+                self.com_diff(com_current, ref_com) 
             )   
         }
         
-
     
-        reward = sum(reward_tuple.values())
+        quaterion_error = reward_tuple['reference_quaternions']
+        angular_error = reward_tuple['reference_angular']
+        end_error = reward_tuple['reference_end_effector']
+        com_error = reward_tuple['reference_com']
+        #reward = sum(reward_tuple.values())
+        #jax.debug.print("quat error{}:",quaterion_error)
+        #jax.debug.print("ang error{}:",angular_error)
+        #jax.debug.print("end error{}:",end_error)
+        #jax.debug.print("com error{}:",com_error)
+        
+        
+        
+        reward_1 = (self.w_p*jp.exp(-quaterion_error)) + (self.w_v * jp.exp(-angular_error))
+        reward_2 = (self.w_e * jp.exp(-end_error)) + (self.w_c * jp.exp(-com_error))
+        reward = (reward_1 + reward_2)
+        #jax.debug.print("reward from env {}:",reward)
+        
         
         return reward, reward_tuple
         
     
-    def com_reward(self,com_current, ref_com):
+    def com_diff(self,com_current, ref_com):
         # jax.debug.print("com result local:{}",com_current)
-        # jax.debug.print("ref com result ref:{}",ref_com)    
-        # com_dist = jp.linalg.norm(com_current - ref_com)         
-        # com_reward = jp.exp(-self.w_com * (com_dist**2))
-        com_dist_squared = jp.sum((com_current - ref_com) ** 2)
-        com_reward = jp.exp(-self.w_com * com_dist_squared)
+        # jax.debug.print("ref com result ref:{}",ref_com)
+        #shape 3x1    
+        com_norm = jp.linalg.norm(ref_com - com_current,axis=-1)         
+        com_dist = jp.sum(com_norm)
+        com_reward = self.w_com * com_dist
+        
         return com_reward
         
     
@@ -316,12 +341,12 @@ class HumanoidPPOENV(HumanoidTemplate):
     def end_effector_diff(self,current_ee,current_ref_ee):
         # jax.debug.print("end diff result local:{}",current_ee)
         # jax.debug.print("end diff result ref:{}",current_ref_ee)        
-        #ee_dist = jp.linalg.norm(current_ee - current_ref_ee)        
+        ee_norm = jp.linalg.norm(current_ref_ee - current_ee,axis=-1)        
         #jax.debug.print("end dis:{}",ee_dist)
-        #ee_reward = jp.exp(-self.w_efector * (ee_dist**2))
+        ee_dist = jp.sum(ee_norm)
+        ee_reward = self.w_efector * ee_dist
         #jax.debug.print("ee_reward:{}",ee_reward)
-        ee_dist_squared = jp.sum(jp.linalg.norm(current_ee - current_ref_ee, axis=1) ** 2)
-        ee_reward = jp.exp(-self.w_efector * ee_dist_squared)
+        
         return ee_reward
         
     
@@ -330,47 +355,19 @@ class HumanoidPPOENV(HumanoidTemplate):
         # jax.debug.print("ang diff result local:{}",local_ang)
         # jax.debug.print("ang diff result ref:{}",ref_local_ang)
         
-        # ang_dist = jp.linalg.norm(local_ang - ref_local_ang)
+        ang_norm = jp.linalg.norm(ref_local_ang - local_ang,axis=-1)
+        ang_dist = jp.sum(ang_norm)
+        ang_reward = self.w_angular * ang_dist
         
-        # ang_reward = jp.exp(-self.w_angular * (ang_dist**2))
-        
-        
-        
-        ang_dist_squared = jp.sum(jp.linalg.norm(local_ang - ref_local_ang, axis=1) ** 2)
-        ang_reward = jp.exp(-self.w_angular * ang_dist_squared)
         return ang_reward
         
     
     
     #relative quat ref to quatcurrent
-    def quat_diff(self, local_rot, current_state_ref):
-        #in the calculation we include the root
-        
-        #chenge the order to use the quat diff from insactor paper
-        # current_quat = local_rot[:, [1, 2, 3, 0]] 
-        # ref_quat = current_state_ref[:, [1, 2, 3, 0]] 
-        
-        # current_quat_normalized = diff_quat.quat_normalize(current_quat) 
-        # ref_quat_normalized = diff_quat.quat_normalize(ref_quat)
-        # quat_diff= diff_quat.quat_mul_norm(current_quat_normalized,diff_quat.quat_inverse(ref_quat_normalized))
-
-        
-        # # Get the scalar rotation to get difference displacement
-        # # Assuming the quaternion is [x, y, z, w], with w at the last position:
-        # angles = 2 * jp.arccos(jp.clip(jp.abs(quat_diff[:, 3]), -1.0, 1.0))
-        
-        
-        # norm = jp.linalg.norm(angles)
-        
-        # quat_reward = jp.exp(-self.w_pose *(norm**2))
-        
-        local_rot = local_rot.at[0].set(local_rot[0])
-        current_state_ref = current_state_ref.at[0].set(current_state_ref[0])
-        
-        
-        
-        current_rot6D = quaternion_to_rotation_6d(local_rot)
-        ref_rot6D = quaternion_to_rotation_6d(current_state_ref)
+    def quat_diff(self, local_rotations,ref_local_rotations,data,current_state_ref):
+        #in the calculation we include the root 
+        current_rot6D = quaternion_to_rotation_6d(local_rotations[1:])
+        ref_rot6D = quaternion_to_rotation_6d(ref_local_rotations[1:])
         
         #rot_dist = jp.linalg.norm(current_rot6D - ref_rot6D)
         
@@ -380,9 +377,12 @@ class HumanoidPPOENV(HumanoidTemplate):
         
         #jax.debug.print("quat diff result:{}",quat_reward)
         
-        rot_dist= jp.sum(jp.linalg.norm(current_rot6D - ref_rot6D , axis=1) ** 2)
-        quat_reward = jp.exp(-self.w_pose * rot_dist)
+        #along the last axis which is the columns
+        rot_norm = jp.linalg.norm(ref_rot6D-current_rot6D,axis=-1)
         
+        rot_dist = jp.sum(rot_norm)
+        
+        quat_reward = self.w_pose * rot_dist
         
         
         return quat_reward
@@ -394,7 +394,33 @@ class HumanoidPPOENV(HumanoidTemplate):
         return data.subtree_com[1]
     
     
-
-
+    def _get_obs(self, data: base.State, step_idx: jp.ndarray,state_info: Dict[str, Any])-> jp.ndarray:
+          
+        current_step_inx =  jp.asarray(step_idx, dtype=jp.int64)
+                
+        #relative_pos , local_rotations,local_vel,local_ang = self.convert_local(data)
+        relative_pos , local_rotations,local_vel,local_ang = self.convertLocaDiff(data)
+        
+        relative_pos = relative_pos[1:]
+        # #q_relative_pos,q_local_rotations, q_local_vel, q_local_ang = self.convertLocaDiff(data)
+        
+        local_rotations = local_rotations.at[0].set(data.x.rot[0])
+        
+        
+        # #convert quat to 6d root
+        rot_6D= quaternion_to_rotation_6d(local_rotations)
+        
+        phi = (current_step_inx % self.cycle_len) / self.cycle_len
+        
+        phi = jp.asarray(phi)
+        
+        
+        #jax.debug.print("phi{}", phi)
+        #I will add the last action
+        last_ref = state_info['kinematic_ref']
+        return jp.concatenate([data.qpos,data.qvel,phi[None]])
+        
+        
+    
     
     

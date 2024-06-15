@@ -70,10 +70,10 @@ class HumanoidEvalTemplate(HumanoidTemplate):
         #deltatime of physics
         dt = self.sys.opt.timestep
         
-        action = jp.clip(action, -1, 1) # Raw action  
-        #target_angles = action * jp.pi * 1.2
+        #action = jp.clip(action, -1, 1) # Raw action  
+        target_angles = action * jp.pi * 1.2
         #exclude the root
-        target_angles = state.info['default_pos'][7:] +(action * jp.pi * 1.2)
+        #target_angles = state.info['default_pos'][7:] +(action * jp.pi * 1.2)
         #target_angles = (action * jp.pi * 1.2)
         #target_angles = action 
         

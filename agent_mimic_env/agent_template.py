@@ -57,7 +57,7 @@ class HumanoidTemplate(PipelineEnv):
         
         path = epath.Path(model_path).as_posix()
         mj_model = mujoco.MjModel.from_xml_path(path)
-        
+        print("this is the model: ",model_path)
         # mj_model.opt.solver = mujoco.mjtSolver.mjSOL_CG
         # mj_model.opt.iterations = 6
         # mj_model.opt.ls_iterations = 6
@@ -79,6 +79,9 @@ class HumanoidTemplate(PipelineEnv):
         #this is to keep separate the sys of the agent
         #and the sys for the reference
         self.sys_reference = deepcopy(self.sys)
+        #data refence for the kinematic reference
+        self.ref_data = mjx.make_data(sys)
+        
         #data for the reference
         self.reference_trajectory_qpos = jp.asarray(reference_data.data_pos)
         self.reference_trajectory_qvel = jp.asarray(reference_data.data_vel)
@@ -140,9 +143,16 @@ class HumanoidTemplate(PipelineEnv):
         # return ref_data
         #now I will return a state depending on the index and the reference trajectory
         return self._pipeline.init(self.sys_reference, ref_qp, ref_qv, self._debug)
-        
-    
-    
+
+    def set_kinematic_ref(self,step_index):
+        step_index =  jp.asarray(step_index, dtype=jp.int64)
+        ref_qp = self.reference_trajectory_qpos[step_index]
+        ref_qv = self.reference_trajectory_qvel[step_index]    
+        self.ref_data = self.ref_data.replace(qpos=ref_qp,qvel=ref_qv)
+        self.ref_data = mjx.forward(self.sys_reference,self.ref_data)
+        return self.ref_data
+
+
     #the standard reset for all the agents derived from this class
     def reset(self, rng: jp.ndarray) -> State:
         
@@ -174,7 +184,7 @@ class HumanoidTemplate(PipelineEnv):
                 'reference_rotation': 0.0,
                 'reference_velocity': 0.0,
                 'reference_angular': 0.0,
-                'min_reference_tracking': 0.0
+                # 'min_reference_tracking': 0.0
             },
             'default_pos': ref_qp,
             'last_action':jp.zeros(28),
@@ -295,11 +305,11 @@ class HumanoidTemplate(PipelineEnv):
             ),
             'reference_angular': (
                 mse_ang(global_ang_state, global_ang_ref)*  self.ang_weight
-            ),
-            'min_reference_tracking':(
-              self._reward_min_reference_tracking(data.qpos,current_state_ref.qvel,data)
-              *2.5 * 3e-3
-            )   
+            )
+            # 'min_reference_tracking':(
+            #   self._reward_min_reference_tracking(data.qpos,current_state_ref.qvel,data)
+            #   *2.5 * 3e-3
+            # )   
         }
         
         reward = -1*sum(reward_tuple.values()) * self.reward_scaling
@@ -331,22 +341,18 @@ class HumanoidTemplate(PipelineEnv):
         relative_pos = relative_pos[1:]
         # #q_relative_pos,q_local_rotations, q_local_vel, q_local_ang = self.convertLocaDiff(data)
         
-        local_rotations = local_rotations.at[0].set(data.x.rot[0])
+        #local_rotations = local_rotations.at[0].set(data.x.rot[0])
         
         
         # #convert quat to 6d root
         rot_6D= quaternion_to_rotation_6d(local_rotations)
         
-        # jax.debug.print("pos mine{}",relative_pos)
-        # jax.debug.print("rot mine {}", local_rotations)
+        #jax.debug.print("pos mine{}",relative_pos)
+        #jax.debug.print("rot mine {}", local_rotations)
         # jax.debug.print("vel mine{}", local_vel)
         # jax.debug.print("ang mine{}", local_ang)
-        # jax.debug.print("pos q{}",q_relative_pos)
-        # jax.debug.print("rot q {}", q_local_rotations)
-        # jax.debug.print("vel q{}", q_local_vel)
-        # jax.debug.print("ang q{}", q_local_ang)
-        #phi
         
+        #phi
         phi = (current_step_inx % self.cycle_len) / self.cycle_len
         
         phi = jp.asarray(phi)
