@@ -45,7 +45,7 @@ sys.path.append(parent_dir)
 
 
 from some_math.rotation6D import quaternion_to_rotation_6d
-from some_math.math_utils_jax import *
+import some_math.math_utils_jax as math_jax
 from utils.SimpleConverter import SimpleConverter
 from utils.util_data import generate_kp_kd_gains
 import some_math.quaternion_diff as diff_quat
@@ -130,10 +130,10 @@ class HumanoidPPOENV(HumanoidTemplate):
         #deltatime of physics
         dt = self.sys.opt.timestep
         
-        #action = jp.clip(action, -1, 1) # Raw action  
-        target_angles = action * jp.pi * 1.2
+        action = jp.clip(action, -1, 1) # Raw action  
+        #target_angles = action * jp.pi * 1.2
         #exclude the root
-        #target_angles = state.info['default_pos'][7:] +(action * jp.pi * 1.2)
+        target_angles = state.info['default_pos'][7:] +(action * jp.pi * 1.2)
         #target_angles = action 
         
         torque = self.pd_function(target_angles,self.sys,state,qpos,qvel,
@@ -259,12 +259,17 @@ class HumanoidPPOENV(HumanoidTemplate):
         
     def compute_rewards_deepmimic(self,data,current_state_ref):
         
-        #first get the local position
-        #local_pos , local_rotations,local_vel,local_ang = self.convert_local(data)
-        local_pos , local_rotations,local_vel,local_ang =self.convertLocaDiff(data)
-        #ref_local_pos , ref_local_rotations,ref_local_vel,ref_local_ang = self.convert_local(current_state_ref)
-        ref_local_pos , ref_local_rotations,ref_local_vel,ref_local_ang = self.convertLocaDiff(current_state_ref)
+       
+        #local_pos , local_rotations,local_vel,local_ang =self.convertLocaDiff(data)
+        #ref_local_pos , ref_local_rotations,ref_local_vel,ref_local_ang = self.convertLocaDiff(current_state_ref)
         
+        current_joint_rotations = self.get_local_joints_rotation(data) 
+        ref_joint_rotations = self.get_local_joints_rotation(current_state_ref) 
+        # #we only want angular velocities
+        current_joints_ang =  data.qvel[3:]
+        ref_ang =   current_state_ref.qvel[3:]
+       
+       
         #jax.debug.print("this is the local ang curret:{}",local_ang)
         #jax.debug.print("this is the local ang ref:{}",ref_local_ang)
                 
@@ -290,11 +295,11 @@ class HumanoidPPOENV(HumanoidTemplate):
         
         reward_tuple = {
             'reference_quaternions': (
-                self.quat_diff(local_rotations,ref_local_rotations,
+                self.quat_diff(current_joint_rotations,ref_joint_rotations,
                                data,current_state_ref)  
             ),
             'reference_angular': (
-                self.angular_diff(local_ang, ref_local_ang)  
+                self.angular_diff(current_joints_ang , ref_ang)  
             ),
             'reference_end_effector': (
                 self.end_effector_diff(current_ee,current_ref_ee) 
@@ -305,23 +310,18 @@ class HumanoidPPOENV(HumanoidTemplate):
         }
         
     
-        quaterion_error = reward_tuple['reference_quaternions']
-        angular_error = reward_tuple['reference_angular']
-        end_error = reward_tuple['reference_end_effector']
-        com_error = reward_tuple['reference_com']
+       
+        reward_quat = self.w_p *jp.exp(-reward_tuple['reference_quaternions']) 
+        reward_ang = self.w_v *jp.exp(-reward_tuple['reference_angular']) 
+        reward_end = self.w_e *jp.exp(-reward_tuple['reference_end_effector']) 
+        reward_com = self.w_c *jp.exp(-reward_tuple['reference_com']) 
+       
         #reward = sum(reward_tuple.values())
         #jax.debug.print("quat error{}:",quaterion_error)
         #jax.debug.print("ang error{}:",angular_error)
         #jax.debug.print("end error{}:",end_error)
         #jax.debug.print("com error{}:",com_error)
-        
-        
-        
-        reward_1 = (self.w_p*jp.exp(-quaterion_error)) + (self.w_v * jp.exp(-angular_error))
-        reward_2 = (self.w_e * jp.exp(-end_error)) + (self.w_c * jp.exp(-com_error))
-        reward = (reward_1 + reward_2)
-        #jax.debug.print("reward from env {}:",reward)
-        
+        reward = reward_quat + reward_ang + reward_end + reward_com
         
         return reward, reward_tuple
         
@@ -330,9 +330,8 @@ class HumanoidPPOENV(HumanoidTemplate):
         # jax.debug.print("com result local:{}",com_current)
         # jax.debug.print("ref com result ref:{}",ref_com)
         #shape 3x1    
-        com_norm = jp.linalg.norm(ref_com - com_current,axis=-1)         
-        com_dist = jp.sum(com_norm)
-        com_reward = self.w_com * com_dist
+        com_norm = jp.linalg.norm(ref_com - com_current,ord=2)         
+        com_reward = self.w_com * com_norm
         
         return com_reward
         
@@ -341,9 +340,9 @@ class HumanoidPPOENV(HumanoidTemplate):
     def end_effector_diff(self,current_ee,current_ref_ee):
         # jax.debug.print("end diff result local:{}",current_ee)
         # jax.debug.print("end diff result ref:{}",current_ref_ee)        
-        ee_norm = jp.linalg.norm(current_ref_ee - current_ee,axis=-1)        
+        ee_norm = jp.linalg.norm(current_ref_ee - current_ee,ord=2,axis=-1)        
         #jax.debug.print("end dis:{}",ee_dist)
-        ee_dist = jp.sum(ee_norm)
+        ee_dist = jp.sum(ee_norm**2)
         ee_reward = self.w_efector * ee_dist
         #jax.debug.print("ee_reward:{}",ee_reward)
         
@@ -354,9 +353,8 @@ class HumanoidPPOENV(HumanoidTemplate):
         
         # jax.debug.print("ang diff result local:{}",local_ang)
         # jax.debug.print("ang diff result ref:{}",ref_local_ang)
-        
-        ang_norm = jp.linalg.norm(ref_local_ang - local_ang,axis=-1)
-        ang_dist = jp.sum(ang_norm)
+        ang_norm = jp.linalg.norm(ref_local_ang - local_ang,ord=2,axis=-1)
+        ang_dist = jp.sum(ang_norm**2)
         ang_reward = self.w_angular * ang_dist
         
         return ang_reward
@@ -366,8 +364,8 @@ class HumanoidPPOENV(HumanoidTemplate):
     #relative quat ref to quatcurrent
     def quat_diff(self, local_rotations,ref_local_rotations,data,current_state_ref):
         #in the calculation we include the root 
-        current_rot6D = quaternion_to_rotation_6d(local_rotations[1:])
-        ref_rot6D = quaternion_to_rotation_6d(ref_local_rotations[1:])
+        current_rot6D = quaternion_to_rotation_6d(local_rotations)
+        ref_rot6D = quaternion_to_rotation_6d(ref_local_rotations)
         
         #rot_dist = jp.linalg.norm(current_rot6D - ref_rot6D)
         
@@ -375,12 +373,12 @@ class HumanoidPPOENV(HumanoidTemplate):
         #quat_reward = jp.exp(-self.w_pose * (rot_dist**2))
 
         
-        #jax.debug.print("quat diff result:{}",quat_reward)
+        #jax.debug.print("current rot 6d:{}",current_rot6D)
         
         #along the last axis which is the columns
-        rot_norm = jp.linalg.norm(ref_rot6D-current_rot6D,axis=-1)
+        rot_norm = jp.linalg.norm(ref_rot6D-current_rot6D,ord=2,axis=-1)
         
-        rot_dist = jp.sum(rot_norm)
+        rot_dist = jp.sum(rot_norm**2)
         
         quat_reward = self.w_pose * rot_dist
         
@@ -394,33 +392,93 @@ class HumanoidPPOENV(HumanoidTemplate):
         return data.subtree_com[1]
     
     
-    def _get_obs(self, data: base.State, step_idx: jp.ndarray,state_info: Dict[str, Any])-> jp.ndarray:
+    # def _get_obs(self, data: base.State, step_idx: jp.ndarray,state_info: Dict[str, Any])-> jp.ndarray:
           
-        current_step_inx =  jp.asarray(step_idx, dtype=jp.int64)
-                
-        #relative_pos , local_rotations,local_vel,local_ang = self.convert_local(data)
-        relative_pos , local_rotations,local_vel,local_ang = self.convertLocaDiff(data)
+    #     current_step_inx =  jp.asarray(step_idx, dtype=jp.int64)
+                        
+    #     phi = (current_step_inx % self.cycle_len) / self.cycle_len
         
-        relative_pos = relative_pos[1:]
-        # #q_relative_pos,q_local_rotations, q_local_vel, q_local_ang = self.convertLocaDiff(data)
+    #     phi = jp.asarray(phi)
+    #     #jax.debug.print("phi{}", phi)
+    #     #I will add the last action
+    #     last_ref = state_info['kinematic_ref']
+    #     return jp.concatenate([data.qpos[2:],data.qvel,phi[None]])
         
-        local_rotations = local_rotations.at[0].set(data.x.rot[0])
+    def get_local_joints_rotation(self,data):
         
+        current_xrot = data.xquat[1:]
+        #this is already in quat form
+        current_qpos_root = data.qpos[3:7]
+        #qpos of the joins this are scale values, since they are hinge joints
+        current_qpos_joints = data.qpos[7:] 
+        #now I will convert them into quaterions
+        #first the joints that are onedofs, thus axis angle to quaterion
+        hinge_quat = self.hinge_to_quat(current_qpos_joints)
         
-        # #convert quat to 6d root
-        rot_6D= quaternion_to_rotation_6d(local_rotations)
+        local_quat = self.local_quat(current_qpos_root,current_xrot,hinge_quat,self.one_dofs_joints_idx,self.link_types_array_without_root)
         
-        phi = (current_step_inx % self.cycle_len) / self.cycle_len
-        
-        phi = jp.asarray(phi)
-        
-        
-        #jax.debug.print("phi{}", phi)
-        #I will add the last action
-        last_ref = state_info['kinematic_ref']
-        return jp.concatenate([data.qpos,data.qvel,phi[None]])
-        
-        
+        return local_quat
     
+    def hinge_to_quat(self,current_joints):
+        #jnt_axis without free joint
+        axis_hinge = self.sys.jnt_axis[1:]
+        vmap_compute_quaternion = jax.vmap(math_jax.compute_quaternion_for_joint, in_axes=(0, 0))     
+        hinge_quat = vmap_compute_quaternion(axis_hinge,current_joints) 
+        return hinge_quat
     
+    def local_quat(self,current_root_rot,current_x_quat,hinge_quat,one_dofs_joints_idx, link_types_array_without_root):
+        # Mask to filter out the quaternions that are not to be combined in triples
+        mask = jp.ones(hinge_quat.shape[0], dtype=bool)
+        mask = mask.at[one_dofs_joints_idx].set(False)
+        
+        # #keep track of the true and false values
+        # true_mask = jp.sum(mask)
+        # false_mask = mask.size - true_mask
+        
+        # Indices that can be combined
+        combinable_indices = jp.nonzero(mask, size=mask.size)[0]
+#       #since the size will be 28, the same as the mask we only select
+        #the first values and get rid of the last values, for now
+        #24 and 4 is static. I wish to do this dynamic
+        combinable_indices = combinable_indices[0:24]
+        
+        # Indices that cannot be combined
+        non_combinable_indices = jp.nonzero(~mask, size=mask.size)[0]
+        non_combinable_indices = non_combinable_indices[0:4]
+             
+        no_grouped_quaterions = hinge_quat[non_combinable_indices]
+
+        #select and store these indices
+        # Assuming the remaining quaternions are multiple of three
+        # Reshape the array to (-1, 3, 4) where 3 is the number of quaternions to be combined and 4 is the quaternion dimension
+        grouped_quaternions = hinge_quat[combinable_indices].reshape(-1, 3, 4)
+        #this will be applied on the first axis
+        vmap_combined_quat = jax.vmap(math_jax.combine_quaterions_joint_3DOFS)
+
+        quat_combined = vmap_combined_quat(grouped_quaternions)
+        #there are 13 links -12, since we will merge the root at the end the shape 1 is 4 for the quat
+        quat_loc_all_joints = jp.zeros((current_x_quat.shape[0]-1,current_x_quat.shape[1]))
+
+        #Create a mask where each position is True if the corresponding link type is 3
+        link_types_mask = link_types_array_without_root == 3
+        
+        filter_out_jnt_type_3_idx = jp.nonzero(link_types_mask,size=link_types_mask.size)
+        
+        #the first row is where is the data the shape is 1,12
+        #there are 8 indices for the 3 dofs and 4 for the one dofs
+        filter_out_jnt_type_3_idx = jp.array(filter_out_jnt_type_3_idx)[0][0:8]
+        
+        filter_out_jnt_type_one_dofs = jp.nonzero(~link_types_mask,size=link_types_mask.size)
+        
+        filter_out_jnt_type_one_dofs = jp.array(filter_out_jnt_type_one_dofs)[0][0:4]
+        
+        
+        quat_loc_all_joints = quat_loc_all_joints.at[filter_out_jnt_type_3_idx].set(quat_combined)
+
+        quat_loc_all_joints = quat_loc_all_joints.at[filter_out_jnt_type_one_dofs].set(no_grouped_quaterions)
+
+        #we reshape the currenr root, rot to get a 1x4 and avoid errors
+        quat_loc_all_joints = jp.concatenate([current_root_rot.reshape(1,-1),quat_loc_all_joints],axis=0)
+
+        return quat_loc_all_joints
     

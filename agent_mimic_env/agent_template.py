@@ -111,9 +111,29 @@ class HumanoidTemplate(PipelineEnv):
         #right_wrist,left_writst,right_ankle,left_ankle
         #the geom_xpos has a shape of 16x3
         self.dict_ee = jp.array([6,9,12,15])
-        
-        
-        
+        self.link_type()
+        self.set_joints_one_idx()
+    
+    
+    
+    def link_type(self):
+        # Remove the first character ('f') and convert the rest to a list of integers
+        link_types_numbers = [int(char) for char in self.sys.link_types[1:]]
+
+        # Convert the list of integers to a JAX array
+        self.link_types_array_without_root = jp.array(link_types_numbers)
+    
+    def set_joints_one_idx(self):
+        self.right_elbow_joint = util_data.get_actuator_indx(self.sys.mj_model,'right_elbow','X')
+        self.left_elbow_joint = util_data.get_actuator_indx(self.sys.mj_model,'left_elbow','X')
+        self.right_knee_joint = util_data.get_actuator_indx(self.sys.mj_model,'right_knee','X')
+        self.left_knee_joint = util_data.get_actuator_indx(self.sys.mj_model,'left_knee','X')
+
+        self.one_dofs_joints_idx = jp.array([self.right_elbow_joint,self.left_elbow_joint,
+                                             self.right_knee_joint,self.left_knee_joint])        
+    
+    
+    
     def set_pd_callback(self,pd_control):
         self.pd_function = pd_control
     
@@ -341,7 +361,7 @@ class HumanoidTemplate(PipelineEnv):
         relative_pos = relative_pos[1:]
         # #q_relative_pos,q_local_rotations, q_local_vel, q_local_ang = self.convertLocaDiff(data)
         
-        #local_rotations = local_rotations.at[0].set(data.x.rot[0])
+        local_rotations = local_rotations.at[0].set(data.x.rot[0])
         
         
         # #convert quat to 6d root
