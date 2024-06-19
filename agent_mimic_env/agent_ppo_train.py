@@ -118,8 +118,8 @@ class HumanoidPPOENV(HumanoidTemplate):
         
         state = State(data, obs, reward, done, metrics,state_info)
            
-        #return jax.lax.stop_gradient(state)
-        return state
+        return jax.lax.stop_gradient(state)
+        #return state
     
   
     def step(self, state: State, action: jp.ndarray) -> State:
